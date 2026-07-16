@@ -1792,11 +1792,19 @@ function PileViewer({ game, viewer, setViewer, setSel, sel, actionsFor, plabel }
 /* ====================================================================== */
 const ENGINE = {
   core: "https://esm.sh/jsr/@n1xx1/ocgcore-wasm@0.1.3",
-  sqljs: "https://esm.sh/sql.js@1.11.0",
+  sqljsScript: "https://cdn.jsdelivr.net/npm/sql.js@1.11.0/dist/sql-wasm.js", // browser UMD build (sets window.initSqlJs)
   sqlWasm: "https://cdn.jsdelivr.net/npm/sql.js@1.11.0/dist/sql-wasm.wasm",
   cdb: "https://cdn.jsdelivr.net/gh/ProjectIgnis/BabelCDB@master/cards.cdb",
   script: (code) => `https://cdn.jsdelivr.net/gh/ProjectIgnis/CardScripts@master/official/c${code}.lua`,
 };
+/* inject a UMD <script> once and resolve when it's loaded */
+const loadScript = (src) => new Promise((res, rej) => {
+  if ([...document.scripts].some((s) => s.src === src)) return res();
+  const el = document.createElement("script");
+  el.src = src; el.async = true;
+  el.onload = () => res(); el.onerror = () => rej(new Error("failed to load " + src));
+  document.head.appendChild(el);
+});
 
 function EngineBeta({ main }) {
   const [steps, setSteps] = useState([]);
@@ -1816,10 +1824,11 @@ function EngineBeta({ main }) {
     ];
     setSteps(plan.map((label) => ({ label, state: "pending", note: "" })));
     try {
-      // 1. sql.js
+      // 1. sql.js (browser UMD build → window.initSqlJs; avoids esm.sh's fs shim)
       set(0, { state: "run" });
-      const sqlMod = await import(/* @vite-ignore */ ENGINE.sqljs);
-      const initSqlJs = sqlMod.default || sqlMod;
+      await loadScript(ENGINE.sqljsScript);
+      const initSqlJs = window.initSqlJs;
+      if (typeof initSqlJs !== "function") throw new Error("initSqlJs global not found after load");
       const SQL = await initSqlJs({ locateFile: () => ENGINE.sqlWasm });
       set(0, { state: "ok", note: "sql.js ready" });
 
