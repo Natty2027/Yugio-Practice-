@@ -1836,7 +1836,14 @@ function EngineBeta({ main, extra }) {
       log("Loading card database…");
       const db = await ensureDb();
       log("Loading engine core (sync)…");
-      const mod = await import(/* @vite-ignore */ ENGINE.core);
+      // the bundled URL is what actually resolves the code-split wasm chunks
+      const candidates = [ENGINE.core + "?bundle", ENGINE.core];
+      let mod = null, lastErr = "";
+      for (const url of candidates) {
+        try { mod = await import(/* @vite-ignore */ url); break; }
+        catch (e) { lastErr = String(e?.message || e); }
+      }
+      if (!mod) throw new Error("engine import failed — " + lastErr);
       const createCore = mod.default || mod.createCore;
       if (typeof createCore !== "function") throw new Error("createCore not found");
       const L = mod.OcgLocation || { DECK: 1, EXTRA: 64 };
