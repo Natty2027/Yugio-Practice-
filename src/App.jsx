@@ -141,7 +141,7 @@ export default function App() {
       const names = SAMPLE.map((s) => s[0]);
       let byName = {};
       try {
-        const res = await fetch(`${API}?name=${encodeURIComponent(names.join("|"))}`);
+        const res = await fetch(`${API}?misc=yes&name=${encodeURIComponent(names.join("|"))}`);
         const j = await res.json();
         if (j.data) j.data.forEach((c) => (byName[c.name] = c));
         if (alive) setOnline(true);
@@ -247,19 +247,34 @@ export default function App() {
 
 /* ---- helpers ---------------------------------------------------------- */
 function normalize(c) {
+  const misc = c.misc_info?.[0];
   return {
     id: c.card_images?.[0]?.id ?? c.id,
     name: c.name,
     frameType: c.frameType || (c.type?.toLowerCase().includes("spell") ? "spell" : c.type?.toLowerCase().includes("trap") ? "trap" : "effect"),
     type: c.type,
-    level: c.level ?? c.linkval ?? null,
+    level: c.level ?? c.rank ?? c.linkval ?? null,
     atk: c.atk ?? null,
     def: c.def ?? null,
     attribute: c.attribute ?? null,
     race: c.race ?? null,
     desc: c.desc ?? "",
+    // open-source Master Duel data (via YGOPRODeck misc_info)
+    rarity: misc?.md_rarity ?? null,
+    formats: misc?.formats ?? null,
+    inMD: misc?.formats ? misc.formats.includes("Master Duel") : null,
+    banTcg: c.banlist_info?.ban_tcg ?? null,
+    banOcg: c.banlist_info?.ban_ocg ?? null,
   };
 }
+/* short rarity tag + colour for the Master Duel rarity gems */
+const RARITY = {
+  "Ultra Rare": { t: "UR", c: "#e8b84b" },
+  "Super Rare": { t: "SR", c: "#c0c0d8" },
+  Rare: { t: "R", c: "#6fb6ff" },
+  "N-Rare": { t: "N", c: "#9aa2b1" },
+  Normal: { t: "N", c: "#9aa2b1" },
+};
 const groupBy = (list) => {
   const m = new Map();
   list.forEach((c) => m.set(c.name, { card: c, n: (m.get(c.name)?.n || 0) + 1 }));
@@ -277,6 +292,7 @@ function Editor({ main, extra, side, setMain, setExtra, setSide, addCard, remove
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [dest, setDest] = useState("auto");     // auto | side
+  const [mdOnly, setMdOnly] = useState(true);    // restrict pool to the Master Duel card set
   const [preview, setPreview] = useState(null);
   const [savedNames, setSavedNames] = useState([]);
   const debounce = useRef(null);
@@ -292,20 +308,22 @@ function Editor({ main, extra, side, setMain, setExtra, setSide, addCard, remove
     if (cat) p.set("type", cat);
     if (attr) p.set("attribute", attr);
     if (level) p.set("level", level);
-    p.set("num", "60"); p.set("offset", "0");
+    if (mdOnly) p.set("format", "master duel");   // open Master Duel legal pool
+    p.set("misc", "yes");                          // pulls md_rarity / formats
+    p.set("num", "80"); p.set("offset", "0");
     try {
       const r = await fetch(`${API}?${p.toString()}`);
       const j = await r.json();
       setResults((j.data || []).map(normalize));
     } catch { setResults([]); flash("Search unavailable offline"); }
     setLoading(false);
-  }, [q, cat, attr, level]);
+  }, [q, cat, attr, level, mdOnly]);
 
   useEffect(() => {
     clearTimeout(debounce.current);
     debounce.current = setTimeout(runSearch, 320);
     return () => clearTimeout(debounce.current);
-  }, [q, cat, attr, level, runSearch]);
+  }, [q, cat, attr, level, mdOnly, runSearch]);
 
   const total = main.length;
   const mainGroups = useMemo(() => groupBy(main), [main]);
@@ -362,40 +380,77 @@ function Editor({ main, extra, side, setMain, setExtra, setSide, addCard, remove
     flash(`Loaded ${name}`);
   };
 
+  const hover = (c) => setPreview(c);
+
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.35fr) minmax(320px,1fr)", gap: 0, height: "calc(100vh - 60px)" }}>
-      {/* ---- search side ---- */}
-      <section style={{ borderRight: `1px solid ${C.line}`, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.line}`, display: "flex", flexWrap: "wrap", gap: 8 }}>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search cards by name…"
-            style={inp(1, "180px")} />
-          <select value={cat} onChange={(e) => setCat(e.target.value)} style={inp()}>
-            {CATS.map(([v, l]) => <option key={l} value={v}>{l}</option>)}
+    <div style={{ display: "grid", gridTemplateColumns: "272px minmax(0,1fr) minmax(300px,.92fr)", height: "calc(100vh - 60px)", background: MD.bg }}>
+      {/* ---- left: full card inspector (Master Duel style) ---- */}
+      <aside style={{ borderRight: `1px solid ${MD.line}`, padding: 14, overflowY: "auto", background: `linear-gradient(180deg, ${MD.panel}, ${MD.bg})` }}>
+        <CardInspector card={preview} />
+      </aside>
+
+      {/* ---- centre: the deck being built ---- */}
+      <section style={{ display: "flex", flexDirection: "column", minWidth: 0, borderRight: `1px solid ${MD.line}` }}>
+        <div style={{ padding: "10px 14px", borderBottom: `1px solid ${MD.line}`, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <span className="disp" style={{ fontSize: 13, color: MD.gold, marginRight: 4 }}>Deck</span>
+          <button onClick={saveDeck} style={mdBtn()}>Save</button>
+          <select onChange={(e) => e.target.value && loadDeck(e.target.value)} value="" style={{ ...inp(), maxWidth: 120 }}>
+            <option value="">Load…</option>
+            {savedNames.map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
-          <select value={attr} onChange={(e) => setAttr(e.target.value)} style={inp()}>
-            {ATTRS.map((a) => <option key={a} value={a}>{a || "Any attr"}</option>)}
-          </select>
-          <select value={level} onChange={(e) => setLevel(e.target.value)} style={inp()}>
-            <option value="">Any Lv</option>
-            {Array.from({ length: 12 }, (_, i) => i + 1).map((l) => <option key={l} value={l}>Lv/Rk {l}</option>)}
-          </select>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
-            <span className="mono" style={{ fontSize: 10, color: C.mute }}>ADD TO</span>
-            {["auto", "side"].map((d) => (
-              <button key={d} onClick={() => setDest(d)} className="disp"
-                style={{ fontSize: 10, padding: "5px 9px", borderRadius: 5, border: `1px solid ${dest === d ? C.gold : C.line}`, background: dest === d ? "rgba(232,184,75,.14)" : "transparent", color: dest === d ? C.gold : C.mute }}>
-                {d === "auto" ? "Main/Extra" : "Side"}
-              </button>
-            ))}
+          <button onClick={() => fileRef.current?.click()} style={mdBtn()}>Import .ydk</button>
+          <button onClick={exportYdk} style={mdBtn()}>Export</button>
+          <button onClick={() => { setMain([]); setExtra([]); setSide([]); }} style={{ ...mdBtn(), borderColor: C.bad, color: C.bad }}>Clear</button>
+          <input ref={fileRef} type="file" accept=".ydk,.txt" style={{ display: "none" }}
+            onChange={(e) => e.target.files[0] && importYdk(e.target.files[0])} />
+        </div>
+
+        <div style={{ overflowY: "auto", flex: 1, padding: 14 }}>
+          <DeckSection title="Main Deck" count={main.length} min={40} max={60}
+            groups={mainGroups} onRemove={(n) => removeOne(main, setMain, n)} onHover={hover} />
+          <DeckSection title="Extra Deck" count={extra.length} min={0} max={15}
+            groups={extraGroups} onRemove={(n) => removeOne(extra, setExtra, n)} onHover={hover} />
+          <DeckSection title="Side Deck" count={side.length} min={0} max={15}
+            groups={sideGroups} onRemove={(n) => removeOne(side, setSide, n)} onHover={hover} />
+        </div>
+      </section>
+
+      {/* ---- right: searchable card pool ---- */}
+      <section style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <div style={{ padding: "12px 14px", borderBottom: `1px solid ${MD.line}`, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search card name…" style={inp(1, "120px")} />
+            <button onClick={() => setMdOnly((v) => !v)} className="disp" title="Restrict to the Master Duel card set"
+              style={{ fontSize: 10, padding: "6px 10px", borderRadius: 6, border: `1px solid ${mdOnly ? MD.gold : MD.line}`, background: mdOnly ? "rgba(232,184,75,.16)" : "transparent", color: mdOnly ? MD.gold : C.mute, whiteSpace: "nowrap" }}>
+              MD only
+            </button>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <select value={cat} onChange={(e) => setCat(e.target.value)} style={inp()}>
+              {CATS.map(([v, l]) => <option key={l} value={v}>{l}</option>)}
+            </select>
+            <select value={attr} onChange={(e) => setAttr(e.target.value)} style={inp()}>
+              {ATTRS.map((a) => <option key={a} value={a}>{a || "Any attr"}</option>)}
+            </select>
+            <select value={level} onChange={(e) => setLevel(e.target.value)} style={inp()}>
+              <option value="">Any Lv</option>
+              {Array.from({ length: 12 }, (_, i) => i + 1).map((l) => <option key={l} value={l}>Lv/Rk {l}</option>)}
+            </select>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
+              {["auto", "side"].map((d) => (
+                <button key={d} onClick={() => setDest(d)} className="disp"
+                  style={{ fontSize: 10, padding: "5px 9px", borderRadius: 5, border: `1px solid ${dest === d ? MD.gold : MD.line}`, background: dest === d ? "rgba(232,184,75,.14)" : "transparent", color: dest === d ? MD.gold : C.mute }}>
+                  {d === "auto" ? "→ Main/Extra" : "→ Side"}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
-        <div style={{ overflowY: "auto", padding: 14, flex: 1 }}>
+        <div style={{ overflowY: "auto", padding: 12, flex: 1 }}>
           {loading && <p className="mono" style={{ color: C.mute, fontSize: 12 }}>searching…</p>}
-          {!loading && results.length === 0 && (
-            <EmptyHint />
-          )}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(96px,1fr))", gap: 10 }}>
+          {!loading && results.length === 0 && <EmptyHint mdOnly={mdOnly} />}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(72px,1fr))", gap: 7 }}>
             {results.map((c) => (
               <CardTile key={c.id + c.name} card={c}
                 badge={countOf(main, c.name) + countOf(extra, c.name) + countOf(side, c.name)}
@@ -405,123 +460,122 @@ function Editor({ main, extra, side, setMain, setExtra, setSide, addCard, remove
           </div>
         </div>
       </section>
-
-      {/* ---- deck side ---- */}
-      <section style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <div style={{ padding: "10px 14px", borderBottom: `1px solid ${C.line}`, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-          <button onClick={saveDeck} style={btn()}>Save</button>
-          <select onChange={(e) => e.target.value && loadDeck(e.target.value)} value="" style={{ ...inp(), maxWidth: 130 }}>
-            <option value="">Load…</option>
-            {savedNames.map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-          <button onClick={() => fileRef.current?.click()} style={btn()}>Import .ydk</button>
-          <button onClick={exportYdk} style={btn()}>Export</button>
-          <button onClick={() => { setMain([]); setExtra([]); setSide([]); }} style={{ ...btn(), borderColor: C.bad, color: C.bad }}>Clear</button>
-          <input ref={fileRef} type="file" accept=".ydk,.txt" style={{ display: "none" }}
-            onChange={(e) => e.target.files[0] && importYdk(e.target.files[0])} />
-        </div>
-
-        <div style={{ overflowY: "auto", flex: 1, padding: 14 }}>
-          <DeckSection title="Main Deck" count={main.length} min={40} max={60}
-            groups={mainGroups} onRemove={(n) => removeOne(main, setMain, n)} onAdd={(c) => addCard(c, "main")} />
-          <DeckSection title="Extra Deck" count={extra.length} min={0} max={15}
-            groups={extraGroups} onRemove={(n) => removeOne(extra, setExtra, n)} onAdd={(c) => addCard(c, "extra")} />
-          <DeckSection title="Side Deck" count={side.length} min={0} max={15}
-            groups={sideGroups} onRemove={(n) => removeOne(side, setSide, n)} onAdd={(c) => addCard(c, "side")} />
-        </div>
-
-        {preview && <PreviewBar card={preview} />}
-      </section>
     </div>
   );
 }
 
-function EmptyHint() {
+/* Master Duel deck-editor palette (deep navy / violet) */
+const MD = { bg: "#0b0e1a", panel: "#141a30", panel2: "#1c2440", line: "#2c3556", gold: "#e8c25a", accent: "#6d8dff" };
+const mdBtn = () => ({ background: MD.panel2, border: `1px solid ${MD.line}`, color: C.text, borderRadius: 6, padding: "7px 11px", fontSize: 12 });
+
+/* left-hand inspector — big art, stats, effect text, MD rarity */
+function CardInspector({ card }) {
+  if (!card) return (
+    <div style={{ color: C.mute, fontSize: 12.5, lineHeight: 1.6, marginTop: 30, textAlign: "center" }}>
+      <div style={{ fontSize: 40, opacity: .25 }}>🂠</div>
+      <p className="disp" style={{ color: MD.gold, fontSize: 12, margin: "10px 0 6px" }}>Card details</p>
+      Hover any card in your deck or the pool to inspect it here.
+    </div>
+  );
+  const f = FRAME[frameKey(card.frameType)];
+  const rar = card.rarity ? RARITY[card.rarity] : null;
   return (
-    <div style={{ color: C.mute, fontSize: 13, lineHeight: 1.6, maxWidth: 340 }}>
-      <p className="disp" style={{ color: C.gold, fontSize: 13, marginBottom: 6 }}>Build a deck</p>
-      Type a card name, or filter by type / attribute / level. Results come
-      straight from the live card database, so newly released cards show up the
-      day they're added. Click a card to add it — the app routes Extra-Deck
-      monsters automatically.
+    <div>
+      <div style={{ borderRadius: 8, overflow: "hidden", border: `2px solid ${f.bg}`, boxShadow: `0 8px 26px rgba(0,0,0,.55)` }}>
+        <img src={IMG(card.id)} alt={card.name} style={{ width: "100%", display: "block", background: MD.panel2 }} onError={(e) => (e.target.style.visibility = "hidden")} />
+      </div>
+      <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 14, fontWeight: 800, lineHeight: 1.2 }}>{card.name}</span>
+        {rar && <span className="mono" style={{ fontSize: 9, fontWeight: 700, color: "#1a1206", background: rar.c, borderRadius: 4, padding: "1px 5px" }}>{rar.t}</span>}
+      </div>
+      <div className="mono" style={{ fontSize: 10.5, color: f.bg, marginTop: 4, textTransform: "uppercase", letterSpacing: ".04em" }}>{card.type}</div>
+      <div className="mono" style={{ fontSize: 11, color: C.mute, marginTop: 4, display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {card.attribute && <span>{card.attribute}</span>}
+        {card.race && <span>{card.race}</span>}
+        {card.level != null && <span>{isExtra(card.frameType) && /link/i.test(card.frameType) ? "LINK" : "Lv/Rk"} {card.level}</span>}
+      </div>
+      {card.atk != null && (
+        <div className="mono" style={{ fontSize: 13, color: MD.gold, marginTop: 6, fontWeight: 700 }}>ATK {card.atk} / DEF {card.def ?? "—"}</div>
+      )}
+      {(card.banTcg || card.banOcg) && (
+        <div className="mono" style={{ fontSize: 10, color: C.bad, marginTop: 6 }}>
+          {card.banTcg ? `TCG: ${card.banTcg}` : ""}{card.banTcg && card.banOcg ? " · " : ""}{card.banOcg ? `OCG: ${card.banOcg}` : ""}
+        </div>
+      )}
+      <div style={{ fontSize: 11.5, color: "#c8cee0", marginTop: 10, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{card.desc}</div>
     </div>
   );
 }
 
-function DeckSection({ title, count, min, max, groups, onRemove, onAdd }) {
+function EmptyHint({ mdOnly }) {
+  return (
+    <div style={{ color: C.mute, fontSize: 12.5, lineHeight: 1.6 }}>
+      <p className="disp" style={{ color: MD.gold, fontSize: 12, marginBottom: 6 }}>Search the pool</p>
+      Type a name or filter by type / attribute / level. {mdOnly ? "Showing only cards in the Master Duel set — " : "Showing the full card database — "}
+      toggle <b>MD only</b> to switch. Click a card to add it; Extra-Deck monsters route automatically.
+    </div>
+  );
+}
+
+/* one deck zone rendered as an image grid, like Master Duel's edit screen */
+function DeckSection({ title, count, min, max, groups, onRemove, onHover }) {
   const ok = count >= min && count <= max;
   return (
-    <div style={{ marginBottom: 18 }}>
+    <div style={{ marginBottom: 16 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <span className="disp" style={{ fontSize: 12, color: C.text }}>{title}</span>
-        <span className="mono" style={{ fontSize: 11, color: ok ? C.good : C.mute, border: `1px solid ${ok ? C.good : C.line}`, borderRadius: 20, padding: "1px 8px" }}>
+        <span className="mono" style={{ fontSize: 11, color: ok ? C.good : C.mute, border: `1px solid ${ok ? C.good : MD.line}`, borderRadius: 20, padding: "1px 8px" }}>
           {count}{max ? `/${max}` : ""}
         </span>
-        <div style={{ flex: 1, height: 1, background: C.line }} />
+        <div style={{ flex: 1, height: 1, background: MD.line }} />
       </div>
       {groups.length === 0 && <p className="mono" style={{ fontSize: 11, color: C.mute }}>empty</p>}
-      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(58px,1fr))", gap: 6 }}>
         {groups.map(({ card, n }) => (
-          <DeckRow key={card.name} card={card} n={n} onRemove={() => onRemove(card.name)} onAdd={() => onAdd(card)} />
+          <DeckCell key={card.name} card={card} n={n} onRemove={() => onRemove(card.name)} onHover={() => onHover(card)} />
         ))}
       </div>
     </div>
   );
 }
 
-function DeckRow({ card, n, onRemove, onAdd }) {
-  const fk = frameKey(card.frameType);
-  const f = FRAME[fk];
+function DeckCell({ card, n, onRemove, onHover }) {
+  const f = FRAME[frameKey(card.frameType)];
+  const [ok, setOk] = useState(true);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, background: C.panel, borderRadius: 6, padding: "4px 6px", borderLeft: `3px solid ${f.bg}` }}>
-      <img src={IMG(card.id, true)} alt="" width="26" height="38"
-        style={{ borderRadius: 2, objectFit: "cover", background: C.panel2 }}
-        onError={(e) => (e.target.style.visibility = "hidden")} />
-      <span style={{ flex: 1, fontSize: 12.5, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{card.name}</span>
-      <span className="mono" style={{ fontSize: 11, color: C.gold, width: 22, textAlign: "right" }}>×{n}</span>
-      <button onClick={onAdd} style={miniBtn()}>+</button>
-      <button onClick={onRemove} style={{ ...miniBtn(), color: C.bad }}>−</button>
-    </div>
+    <button onClick={onRemove} onMouseEnter={onHover} title={`${card.name} — click to remove one`}
+      className="cardimg" style={{ position: "relative", border: `1px solid ${shade(f.bg, 10)}`, borderRadius: 5, overflow: "hidden", padding: 0, aspectRatio: "0.686", background: `linear-gradient(155deg, ${shade(f.bg, 8)}, ${shade(f.bg, -36)})`, cursor: "pointer" }}>
+      {ok ? (
+        <img src={IMG(card.id, true)} alt={card.name} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} onError={() => setOk(false)} />
+      ) : (
+        <div className="disp" style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", fontSize: 8, color: f.fg, padding: "0 4px", textAlign: "center", lineHeight: 1.25 }}>{card.name}</div>
+      )}
+      {n > 1 && <span className="mono" style={{ position: "absolute", bottom: 2, right: 2, background: "rgba(0,0,0,.78)", color: MD.gold, fontSize: 10, fontWeight: 700, borderRadius: 4, padding: "0 4px" }}>×{n}</span>}
+    </button>
   );
 }
 
 function CardTile({ card, badge, onClick, onHover }) {
   const f = FRAME[frameKey(card.frameType)];
+  const rar = card.rarity ? RARITY[card.rarity] : null;
   const [ok, setOk] = useState(true);
   return (
     <button onClick={onClick} onMouseEnter={onHover} title={card.name}
       style={{ position: "relative", border: "none", background: "transparent", padding: 0 }}>
-      <div className="cardimg" style={{ aspectRatio: "0.686", borderRadius: 6, overflow: "hidden", border: `1px solid ${f.bg}`, background: `linear-gradient(155deg, ${shade(f.bg, 10)}, ${shade(f.bg, -34)})` }}>
+      <div className="cardimg" style={{ aspectRatio: "0.686", borderRadius: 5, overflow: "hidden", border: `1px solid ${f.bg}`, background: `linear-gradient(155deg, ${shade(f.bg, 10)}, ${shade(f.bg, -34)})` }}>
         {ok ? (
           <img src={IMG(card.id, true)} alt={card.name} loading="lazy"
             style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
             onError={() => setOk(false)} />
         ) : (
-          <div className="disp" style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", textAlign: "center", fontSize: 9, color: f.fg, padding: "0 6px", lineHeight: 1.3 }}>{card.name}</div>
+          <div className="disp" style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", textAlign: "center", fontSize: 8, color: f.fg, padding: "0 4px", lineHeight: 1.3 }}>{card.name}</div>
         )}
       </div>
+      {rar && <span className="mono" style={{ position: "absolute", bottom: 2, left: 2, background: rar.c, color: "#1a1206", fontSize: 8, fontWeight: 700, borderRadius: 3, padding: "0 3px" }}>{rar.t}</span>}
       {badge > 0 && (
-        <span className="mono" style={{ position: "absolute", top: 4, right: 4, background: C.gold, color: "#1a1206", fontSize: 10, fontWeight: 700, borderRadius: 10, padding: "0 6px" }}>{badge}</span>
+        <span className="mono" style={{ position: "absolute", top: 2, right: 2, background: MD.gold, color: "#1a1206", fontSize: 9, fontWeight: 700, borderRadius: 10, padding: "0 5px" }}>{badge}</span>
       )}
     </button>
-  );
-}
-
-function PreviewBar({ card }) {
-  const f = FRAME[frameKey(card.frameType)];
-  return (
-    <div style={{ borderTop: `1px solid ${C.line}`, background: C.panel, padding: 12, display: "flex", gap: 12, maxHeight: 190 }}>
-      <img src={IMG(card.id)} alt={card.name} width="86"
-        style={{ borderRadius: 4, objectFit: "cover", flexShrink: 0, background: C.panel2 }}
-        onError={(e) => (e.target.style.visibility = "hidden")} />
-      <div style={{ minWidth: 0, overflow: "hidden" }}>
-        <div style={{ fontWeight: 700, fontSize: 14 }}>{card.name}</div>
-        <div className="mono" style={{ fontSize: 10.5, color: f.bg, marginTop: 2, textTransform: "uppercase", letterSpacing: ".05em" }}>
-          {card.type}{card.attribute ? ` · ${card.attribute}` : ""}{card.level != null ? ` · Lv/Rk ${card.level}` : ""}{card.atk != null ? ` · ${card.atk}/${card.def ?? "—"}` : ""}
-        </div>
-        <div style={{ fontSize: 11.5, color: C.mute, marginTop: 6, lineHeight: 1.45, overflowY: "auto", maxHeight: 120 }}>{card.desc}</div>
-      </div>
-    </div>
   );
 }
 
@@ -793,7 +847,14 @@ const PHASE_FULL = { DP: "Draw", SP: "Standby", M1: "Main 1", BP: "Battle", M2: 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const isFieldSpell = (c) => /field/i.test(c.race || "") && /spell/i.test(c.type || "");
 let UID = 0;
-const mkInst = (c) => ({ uid: `i${UID++}`, card: c, pos: "atk" });
+const mkInst = (c) => ({ uid: `i${UID++}`, card: c, pos: "atk", attacked: false });
+
+/* tributes required to Normal Summon a main-deck monster of a given level */
+const tributesFor = (card) => {
+  if (isExtra(card.frameType) || /spell|trap/.test(card.frameType || "")) return 0;
+  const lv = card.level ?? 0;
+  return lv >= 7 ? 2 : lv >= 5 ? 1 : 0;
+};
 
 function buildSide(main, extra) {
   return {
@@ -805,6 +866,13 @@ function buildSide(main, extra) {
     szones: [null, null, null, null, null],
     field: null,
   };
+}
+/* clear per-turn flags for the player whose turn is starting */
+function resetTurnFlags(n, p) {
+  const pl = n.players[p];
+  pl.normalSummoned = false;
+  pl.mzones.forEach((m) => m && (m.attacked = false));
+  n.emz.forEach((e) => e && e.owner === p && (e.inst.attacked = false));
 }
 function pull(n, s) {
   const pl = n.players[s.p]; let x = null;
@@ -841,7 +909,9 @@ function DuelBoard({ main, extra }) {
 
   const start = () => {
     UID = 0;
-    const g = { turn: 1, active: 0, phase: "M1", log: [{ t: 1, m: "Duel start — you go first" }], emz: [null, null], players: [buildSide(main, extra), buildSide(main, extra)] };
+    const g = { turn: 1, active: 0, firstPlayer: 0, winner: null, phase: "M1",
+      log: [{ t: 1, m: "Duel start — P1 goes first (no draw on turn 1)" }],
+      emz: [null, null], players: [buildSide(main, extra), buildSide(main, extra)] };
     g.players.forEach((pl) => { for (let i = 0; i < 5; i++) pl.hand.push(pl.deck.shift()); });
     hist.current = []; setGame(g); setSel(null); setPending(null); setAttackFrom(null); setViewer(null);
   };
@@ -851,6 +921,11 @@ function DuelBoard({ main, extra }) {
       hist.current.push(clone(g)); if (hist.current.length > 50) hist.current.shift();
       const n = clone(g); mut(n);
       if (msg) n.log = [...n.log, { t: n.turn, m: msg }];
+      // win condition: life points hit zero
+      if (n.winner == null) {
+        if (n.players[0].lp <= 0) { n.winner = 1; n.log.push({ t: n.turn, m: "🏆 P2 wins — P1's LP hit 0" }); }
+        else if (n.players[1].lp <= 0) { n.winner = 0; n.log.push({ t: n.turn, m: "🏆 P1 wins — P2's LP hit 0" }); }
+      }
       return n;
     });
     setSel(null); setPending(null); setAttackFrom(null);
@@ -861,10 +936,11 @@ function DuelBoard({ main, extra }) {
   if (!game) return (
     <div style={{ height: "calc(100vh - 60px)", display: "grid", placeItems: "center", padding: 24 }}>
       <div style={{ textAlign: "center", maxWidth: 440 }}>
-        <p className="disp" style={{ color: C.gold, fontSize: 16, marginBottom: 8 }}>Manual Duel · Hot Seat</p>
+        <p className="disp" style={{ color: C.gold, fontSize: 16, marginBottom: 8 }}>Duel · Hot Seat</p>
         <p style={{ color: C.mute, fontSize: 13, lineHeight: 1.6, marginBottom: 20 }}>
           Both sides start with your current deck ({main.length} main / {extra.length} extra), 8000 LP and a 5-card hand.
-          You move every card and apply effects yourself; the board tracks positions, phases, life points, and a full log. Click a card to see its actions.
+          The engine enforces the rules like Master Duel — turn/phase flow, the once-per-turn Normal Summon, tribute costs, battle damage, and win by LP-0 or deck-out.
+          You still apply individual card <i>effects</i> yourself (that needs the full ygopro engine). Click any card for its legal actions.
         </p>
         <button onClick={start} className="disp" style={{ ...btn(), background: C.gold, color: "#1a1206", border: "none", padding: "12px 30px", fontSize: 14 }}>Start Duel</button>
       </div>
@@ -884,23 +960,42 @@ function DuelBoard({ main, extra }) {
       : s.loc === "deck" ? pl.deck[s.idx] : s.loc === "extra" ? pl.extra[s.idx] : zoneInst(s.p, s.loc, s.idx);
   };
 
+  const isTrib = (p, kind, idx) => (pending?.tribs || []).some((t) => t.p === p && t.loc === kind && t.idx === idx);
+  const tributesSatisfied = () => (pending?.tribs?.length || 0) >= (pending?.needTrib || 0);
+  const canTribute = (p, kind, idx) => {
+    if (!pending || pending.kind !== "mon" || !pending.needTrib) return false;
+    if (tributesSatisfied()) return false;
+    if (p !== pending.src.p) return false;
+    if (!(kind === "m" || kind === "emz")) return false;
+    return !!zoneInst(p, kind, idx) && !isTrib(p, kind, idx);
+  };
   const canPlace = (p, kind, idx) => {
     if (!pending) return false;
     const pl = P[p];
-    if (pending.kind === "mon") return (kind === "m" && p === pending.src.p && !pl.mzones[idx]) || (kind === "emz" && !game.emz[idx]);
+    if (pending.kind === "mon") {
+      if (!tributesSatisfied()) return false;
+      const free = (occupied, k) => !occupied || isTrib(p, k, idx);
+      return (kind === "m" && p === pending.src.p && free(pl.mzones[idx], "m")) ||
+        (kind === "emz" && free(game.emz[idx], "emz"));
+    }
     if (pending.kind === "st") return kind === "s" && p === pending.src.p && !pl.szones[idx];
     if (pending.kind === "field") return kind === "field" && p === pending.src.p && !pl.field;
     return false;
   };
+  const addTribute = (p, kind, idx) =>
+    setPending((prev) => ({ ...prev, tribs: [...(prev.tribs || []), { p, loc: kind, idx }] }));
   const finishPlace = (p, kind, idx) => {
     const inst = getInst(pending.src); const name = inst?.card.name || "card";
     const v = pending.pos === "set" ? "Set" : pending.normal ? "Normal Summoned" : "Special Summoned";
     const verb = pending.kind === "st" ? (pending.pos === "settrap" ? "Set" : "activated") : v;
+    const src = pending.src, pos = pending.pos, normal = pending.normal, kindP = pending.kind, tribs = pending.tribs || [];
     commit((n) => {
-      const x = pull(n, pending.src); if (!x) return;
-      placeInst(n, p, kind, idx, x, pending.pos);
-      if (pending.normal && pending.kind === "mon") n.players[pending.src.p].normalSummoned = true;
-    }, `${plabel(pending.src.p)} ${verb} ${name}`);
+      tribs.forEach((t) => { const x = pull(n, t); if (x) { x.pos = "atk"; n.players[t.p].gy.push(x); } });
+      const x = pull(n, src); if (!x) return;
+      x.attacked = false;
+      placeInst(n, p, kind, idx, x, pos);
+      if (normal && kindP === "mon") n.players[src.p].normalSummoned = true;
+    }, `${plabel(src.p)} ${verb} ${name}${tribs.length ? ` (tributing ${tribs.length})` : ""}`);
   };
   /* -------- battle: attacker → target with auto damage calc -------- */
   const beginAttack = (s) => { setAttackFrom(s); setSel(null); setPending(null); };
@@ -931,6 +1026,7 @@ function DuelBoard({ main, extra }) {
       else { msg = `⚔ ${aName} bounces off ${tName} (${aAtk} = DEF ${tDef})`; }
     }
     commit((n) => {
+      const A = getInstMut(n, attackFrom); if (A) A.attacked = true;
       if (dmgTo != null) n.players[dmgTo].lp = Math.max(0, n.players[dmgTo].lp - dmgAmt);
       if (killT) bury(n, tSel);
       if (killA) bury(n, attackFrom);
@@ -940,14 +1036,18 @@ function DuelBoard({ main, extra }) {
   const directAttack = () => {
     const aInst = getInst(attackFrom); if (!aInst) { setAttackFrom(null); return; }
     const aP = attackFrom.p, oppP = 1 - aP, dealt = aInst.card.atk ?? 0;
-    commit((n) => { n.players[oppP].lp = Math.max(0, n.players[oppP].lp - dealt); },
+    commit((n) => { const A = getInstMut(n, attackFrom); if (A) A.attacked = true; n.players[oppP].lp = Math.max(0, n.players[oppP].lp - dealt); },
       `⚔ ${aInst.card.name} attacks directly — ${plabel(oppP)} takes ${dealt}`);
     setAttackFrom(null);
   };
 
   const onZone = (p, kind, idx) => {
     if (attackFrom) { if (atkTarget(p, kind, idx)) resolveAttack({ p, loc: kind, idx }); return; }
-    if (pending) { if (canPlace(p, kind, idx)) finishPlace(p, kind, idx); return; }
+    if (pending) {
+      if (pending.kind === "mon" && !tributesSatisfied()) { if (canTribute(p, kind, idx)) addTribute(p, kind, idx); return; }
+      if (canPlace(p, kind, idx)) finishPlace(p, kind, idx);
+      return;
+    }
     const inst = zoneInst(p, kind, idx);
     if (inst) setSel({ p, loc: kind, idx });
   };
@@ -961,27 +1061,51 @@ function DuelBoard({ main, extra }) {
     const inst = getInst(s); if (!inst) return [];
     const c = inst.card, name = c.name, P1 = plabel(s.p);
     const mon = frameKey(c.frameType) && !/spell|trap/.test(c.frameType);
+    const isActive = s.p === game.active;
+    const mainPhase = game.phase === "M1" || game.phase === "M2";
+    const canMain = isActive && mainPhase && game.winner == null;
     const A = [];
     if (s.loc === "hand") {
       if (mon) {
-        A.push({ l: "Normal Summon (ATK)", go: () => setPending({ kind: "mon", pos: "atk", normal: true, src: s }) });
-        A.push({ l: "Normal Set (DEF)", go: () => setPending({ kind: "mon", pos: "set", normal: true, src: s }) });
-        A.push({ l: "Special Summon (ATK)", go: () => setPending({ kind: "mon", pos: "atk", normal: false, src: s }) });
-        A.push({ l: "Special Summon (DEF)", go: () => setPending({ kind: "mon", pos: "def", normal: false, src: s }) });
+        const need = tributesFor(c);
+        const haveMon = P[s.p].mzones.filter(Boolean).length + game.emz.filter((e) => e && e.owner === s.p).length;
+        const summoned = P[s.p].normalSummoned;
+        const label = need ? `Tribute Summon — ${need} trib` : "Normal Summon (ATK)";
+        if (!canMain) A.push({ l: "Normal Summon", disabled: true, hint: game.winner != null ? "game over" : !isActive ? "not your turn" : "Main Phase only" });
+        else if (summoned) A.push({ l: "Normal Summon", disabled: true, hint: "already summoned this turn" });
+        else if (need > haveMon) A.push({ l: `Tribute Summon`, disabled: true, hint: `needs ${need} tribute${need > 1 ? "s" : ""}` });
+        else {
+          A.push({ l: label, go: () => setPending({ kind: "mon", pos: "atk", normal: true, needTrib: need, tribs: [], src: s }) });
+          A.push({ l: need ? `Tribute Set — ${need} trib` : "Normal Set (DEF)", go: () => setPending({ kind: "mon", pos: "set", normal: true, needTrib: need, tribs: [], src: s }) });
+        }
+        A.push({ l: "Special Summon (ATK)", go: () => setPending({ kind: "mon", pos: "atk", normal: false, needTrib: 0, tribs: [], src: s }) });
+        A.push({ l: "Special Summon (DEF)", go: () => setPending({ kind: "mon", pos: "def", normal: false, needTrib: 0, tribs: [], src: s }) });
       } else if (/spell/i.test(c.type)) {
         A.push({ l: isFieldSpell(c) ? "Activate (Field)" : "Activate", go: () => setPending({ kind: isFieldSpell(c) ? "field" : "st", pos: "up", src: s }) });
-        A.push({ l: "Set", go: () => setPending({ kind: "st", pos: "settrap", src: s }) });
+        if (canMain) A.push({ l: "Set", go: () => setPending({ kind: "st", pos: "settrap", src: s }) });
+        else A.push({ l: "Set", disabled: true, hint: "Main Phase only" });
       } else {
-        A.push({ l: "Set", go: () => setPending({ kind: "st", pos: "settrap", src: s }) });
+        if (canMain) A.push({ l: "Set", go: () => setPending({ kind: "st", pos: "settrap", src: s }) });
+        else A.push({ l: "Set", disabled: true, hint: "Main Phase only" });
       }
       A.push({ l: "Discard to GY", go: () => move(s, "gy", "atk", `${P1} discarded ${name}`) });
       A.push({ l: "Banish", go: () => move(s, "banish", "atk", `${P1} banished ${name}`) });
       A.push({ l: "To Deck (top)", go: () => move(s, "deck", "atk", `${P1} sent ${name} to deck`) });
     } else if (s.loc === "m" || s.loc === "emz") {
-      if (inst.pos !== "atk") A.push({ l: "To ATK (face-up)", go: () => setPos(s, "atk", `${P1}: ${name} → ATK`) });
-      if (inst.pos !== "def") A.push({ l: "To DEF (face-up)", go: () => setPos(s, "def", `${P1}: ${name} → DEF`) });
-      if (inst.pos !== "set") A.push({ l: "Set (face-down DEF)", go: () => setPos(s, "set", `${P1} set a monster`) });
-      if (inst.pos === "atk") A.push({ l: "⚔ Declare attack", go: () => beginAttack(s) });
+      // battle: attack legality enforced (Battle Phase, your turn, not turn 1, once per monster)
+      if (inst.pos === "atk") {
+        if (game.winner != null) { /* no action */ }
+        else if (game.phase !== "BP") A.push({ l: "⚔ Declare attack", disabled: true, hint: "Battle Phase only" });
+        else if (!isActive) A.push({ l: "⚔ Declare attack", disabled: true, hint: "not your turn" });
+        else if (game.turn === 1) A.push({ l: "⚔ Declare attack", disabled: true, hint: "no Battle Phase on turn 1" });
+        else if (inst.attacked) A.push({ l: "⚔ Declare attack", disabled: true, hint: "already attacked" });
+        else A.push({ l: "⚔ Declare attack", go: () => beginAttack(s) });
+      }
+      if (canMain) {
+        if (inst.pos !== "atk") A.push({ l: "To ATK (face-up)", go: () => setPos(s, "atk", `${P1}: ${name} → ATK`) });
+        if (inst.pos !== "def") A.push({ l: "To DEF (face-up)", go: () => setPos(s, "def", `${P1}: ${name} → DEF`) });
+        if (inst.pos !== "set") A.push({ l: "Set (face-down DEF)", go: () => setPos(s, "set", `${P1} set a monster`) });
+      }
       A.push({ l: "Send to GY", go: () => move(s, "gy", "atk", `${P1} sent ${name} to GY`) });
       A.push({ l: "Banish", go: () => move(s, "banish", "atk", `${P1} banished ${name}`) });
       A.push({ l: "Return to Hand", go: () => move(s, "hand", "atk", `${name} returned to hand`) });
@@ -1005,11 +1129,32 @@ function DuelBoard({ main, extra }) {
     return A;
   };
 
-  const drawCard = (p) => commit((n) => { const c = n.players[p].deck.shift(); if (c) n.players[p].hand.push(c); }, `${plabel(p)} drew a card`);
+  const drawCard = (p) => commit((n) => {
+    const c = n.players[p].deck.shift();
+    if (c) n.players[p].hand.push(c);
+    else { n.winner = 1 - p; n.log.push({ t: n.turn, m: `🏆 ${plabel(1 - p)} wins — ${plabel(p)} decked out` }); }
+  }, `${plabel(p)} drew a card`);
   const shuffleDeck = (p) => commit((n) => { shuffle(n.players[p].deck); }, `${plabel(p)} shuffled`);
   const changeLP = (p, d) => commit((n) => { n.players[p].lp = Math.max(0, n.players[p].lp + d); }, `${plabel(p)} LP ${d > 0 ? "+" : ""}${d}`);
-  const setPhase = (ph) => commit((n) => { n.phase = ph; }, `→ ${PHASE_FULL[ph]} Phase`);
-  const endTurn = () => commit((n) => { n.active = 1 - n.active; n.turn += 1; n.phase = "DP"; n.players[n.active].normalSummoned = false; }, `— ${plabel(1 - game.active)}'s turn (T${game.turn + 1}) —`);
+  const setPhase = (ph) => { if (game.winner == null) commit((n) => { n.phase = ph; }, `→ ${PHASE_FULL[ph]} Phase`); };
+  const endTurn = () => commit((n) => {
+    const np = 1 - n.active;
+    n.active = np; n.turn += 1; n.phase = "DP";
+    resetTurnFlags(n, np);
+    // Draw Phase — the incoming player always draws (turn-1 no-draw only applies to the opener)
+    const c = n.players[np].deck.shift();
+    if (c) n.players[np].hand.push(c);
+    else { n.winner = 1 - np; n.log.push({ t: n.turn, m: `🏆 ${plabel(1 - np)} wins — ${plabel(np)} decked out` }); }
+  }, `— ${plabel(1 - game.active)}'s turn (T${game.turn + 1}) · Draw Phase —`);
+  /* advance one phase; auto-skips Battle Phase on turn 1 and ends the turn after End Phase */
+  const nextPhase = () => {
+    if (game.winner != null) return;
+    if (game.phase === "EP") { endTurn(); return; }
+    let ni = PHASES.indexOf(game.phase) + 1;
+    if (PHASES[ni] === "BP" && game.turn === 1) ni++;   // opener has no Battle Phase
+    const np = PHASES[ni];
+    commit((n) => { n.phase = np; }, `→ ${PHASE_FULL[np]} Phase`);
+  };
   const coin = () => commit(() => {}, `🪙 Coin: ${Math.random() < 0.5 ? "Heads" : "Tails"}`);
   const dice = () => commit(() => {}, `🎲 Dice: ${1 + Math.floor(Math.random() * 6)}`);
 
@@ -1024,13 +1169,14 @@ function DuelBoard({ main, extra }) {
         {/* HUD */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: C.panel, borderRadius: 8, padding: "7px 10px", position: "sticky", top: 0, zIndex: 5 }}>
           <span key={game.turn} className="disp turnbanner" style={{ fontSize: 12, color: C.gold }}>Turn {game.turn}</span>
-          <span className="mono" style={{ fontSize: 11, color: you ? C.good : C.bad, border: `1px solid ${you ? C.good : C.bad}`, borderRadius: 20, padding: "2px 9px" }}>{you ? "P1 to move" : "P2 to move"}</span>
+          <span className="mono" style={{ fontSize: 11, color: you ? C.good : C.bad, border: `1px solid ${you ? C.good : C.bad}`, borderRadius: 20, padding: "2px 9px" }}>{you ? "P1's turn" : "P2's turn"}</span>
           <div style={{ display: "flex", gap: 2 }}>
             {PHASES.map((ph) => (
               <button key={ph} onClick={() => setPhase(ph)} title={PHASE_FULL[ph]} className="mono"
                 style={{ fontSize: 10, padding: "4px 7px", borderRadius: 4, border: "none", background: game.phase === ph ? C.gold : C.panel2, color: game.phase === ph ? "#1a1206" : C.mute }}>{ph}</button>
             ))}
           </div>
+          <button onClick={nextPhase} className="disp" style={{ ...miniBar(), background: C.good, color: "#07120b", border: "none" }}>{game.phase === "EP" ? "End Turn ▸" : `Next: ${PHASE_FULL[PHASES[Math.min(PHASES.indexOf(game.phase) + 1, 5)]]} ▸`}</button>
           <button onClick={endTurn} className="disp" style={{ ...miniBar(), background: C.panel2 }}>End Turn ⟳</button>
           <button onClick={undo} style={miniBar()}>↩ Undo</button>
           <button onClick={coin} style={miniBar()}>🪙</button>
@@ -1040,8 +1186,12 @@ function DuelBoard({ main, extra }) {
         </div>
 
         {pending && (
-          <div className="mono" style={{ background: "rgba(79,191,123,.12)", border: `1px solid ${C.good}`, color: C.good, borderRadius: 6, padding: "6px 10px", fontSize: 11.5, display: "flex", justifyContent: "space-between" }}>
-            <span>Select a highlighted zone to place “{getInst(pending.src)?.card.name}”.</span>
+          <div className="mono" style={{ background: "rgba(79,191,123,.12)", border: `1px solid ${C.good}`, color: C.good, borderRadius: 6, padding: "6px 10px", fontSize: 11.5, display: "flex", justifyContent: "space-between", gap: 10 }}>
+            <span>
+              {pending.kind === "mon" && !tributesSatisfied()
+                ? `Tribute Summon: pick ${pending.needTrib - (pending.tribs?.length || 0)} more monster${pending.needTrib - (pending.tribs?.length || 0) > 1 ? "s" : ""} to tribute for “${getInst(pending.src)?.card.name}”.`
+                : `Select a highlighted zone to place “${getInst(pending.src)?.card.name}”.`}
+            </span>
             <button onClick={() => { setPending(null); setSel(null); }} style={{ background: "none", border: "none", color: C.good, textDecoration: "underline" }}>cancel</button>
           </div>
         )}
@@ -1059,11 +1209,11 @@ function DuelBoard({ main, extra }) {
           border: `1px solid ${shade(C.good, -70)}`, boxShadow: "inset 0 0 60px rgba(0,0,0,.55)" }}>
           {/* opponent (P2) — rotated 180° so the whole half faces them across the table */}
           <div style={{ transform: "rotate(180deg)" }}>
-            <PlayerField p={1} P={P} game={game} onZone={onZone} canPlace={canPlace} atkTarget={atkTarget} attackFrom={attackFrom} sel={sel} setSel={setSel} setViewer={setViewer} setHover={setHover} drawCard={drawCard} shuffleDeck={shuffleDeck} changeLP={changeLP} dmg={dmg} hideHand={hideHands} />
+            <PlayerField p={1} P={P} game={game} onZone={onZone} canPlace={canPlace} atkTarget={atkTarget} tribTarget={canTribute} isTrib={isTrib} attackFrom={attackFrom} sel={sel} setSel={setSel} setViewer={setViewer} setHover={setHover} drawCard={drawCard} shuffleDeck={shuffleDeck} changeLP={changeLP} dmg={dmg} hideHand={hideHands} />
           </div>
-          <EMZRow game={game} onZone={onZone} canPlace={canPlace} atkTarget={atkTarget} sel={sel} setHover={setHover} />
+          <EMZRow game={game} onZone={onZone} canPlace={canPlace} atkTarget={atkTarget} tribTarget={canTribute} isTrib={isTrib} sel={sel} setHover={setHover} />
           {/* you (P1) — facing up toward the player */}
-          <PlayerField p={0} P={P} game={game} onZone={onZone} canPlace={canPlace} atkTarget={atkTarget} attackFrom={attackFrom} sel={sel} setSel={setSel} setViewer={setViewer} setHover={setHover} drawCard={drawCard} shuffleDeck={shuffleDeck} changeLP={changeLP} dmg={dmg} hideHand={false} />
+          <PlayerField p={0} P={P} game={game} onZone={onZone} canPlace={canPlace} atkTarget={atkTarget} tribTarget={canTribute} isTrib={isTrib} attackFrom={attackFrom} sel={sel} setSel={setSel} setViewer={setViewer} setHover={setHover} drawCard={drawCard} shuffleDeck={shuffleDeck} changeLP={changeLP} dmg={dmg} hideHand={false} />
         </div>
       </div>
 
@@ -1090,8 +1240,11 @@ function DuelBoard({ main, extra }) {
           {selInst && (
             <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
               <div className="mono" style={{ fontSize: 9.5, color: C.mute, textTransform: "uppercase", letterSpacing: ".08em" }}>{plabel(sel.p)} · {sel.loc.toUpperCase()} — actions</div>
-              {actionsFor(sel).map((a) => (
-                <button key={a.l} onClick={a.go} style={{ textAlign: "left", background: C.panel2, border: `1px solid ${a.l[0] === "⚔" ? C.bad : C.line}`, color: a.l[0] === "⚔" ? C.bad : C.text, borderRadius: 5, padding: "6px 9px", fontSize: 11.5 }}>{a.l}</button>
+              {actionsFor(sel).map((a, i) => (
+                <button key={a.l + i} onClick={a.disabled ? undefined : a.go} disabled={a.disabled}
+                  style={{ textAlign: "left", background: a.disabled ? "transparent" : C.panel2, border: `1px solid ${a.disabled ? C.line : a.l[0] === "⚔" ? C.bad : C.line}`, color: a.disabled ? C.mute : a.l[0] === "⚔" ? C.bad : C.text, borderRadius: 5, padding: "6px 9px", fontSize: 11.5, cursor: a.disabled ? "not-allowed" : "pointer", opacity: a.disabled ? 0.6 : 1 }}>
+                  {a.l}{a.disabled && a.hint ? ` — ${a.hint}` : ""}
+                </button>
               ))}
             </div>
           )}
@@ -1107,6 +1260,17 @@ function DuelBoard({ main, extra }) {
       </div>
 
       {viewer && <PileViewer game={game} viewer={viewer} setViewer={setViewer} setSel={setSel} sel={sel} actionsFor={actionsFor} plabel={plabel} />}
+
+      {game.winner != null && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(4,7,12,.82)", zIndex: 60, display: "grid", placeItems: "center" }}>
+          <div className="turnbanner" style={{ textAlign: "center", background: C.panel, border: `1px solid ${C.gold}`, borderRadius: 14, padding: "30px 44px", boxShadow: `0 0 40px ${C.goldDim}` }}>
+            <div className="disp" style={{ fontSize: 13, color: C.mute, letterSpacing: ".2em" }}>DUEL OVER</div>
+            <div className="disp" style={{ fontSize: 34, color: C.gold, margin: "8px 0 4px" }}>{plabel(game.winner)} WINS</div>
+            <div className="mono" style={{ fontSize: 12, color: C.mute, marginBottom: 18 }}>{P[0].lp} — {P[1].lp}</div>
+            <button onClick={start} className="disp" style={{ ...btn(), background: C.gold, color: "#1a1206", border: "none", padding: "10px 26px", fontSize: 13 }}>Rematch</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1142,36 +1306,40 @@ function DuelCard({ inst, onClick, onHover, selected, target, attacker }) {
   );
 }
 
-function Slot({ inst, valid, selected, target, attacker, onClick, onHover, label }) {
+function Slot({ inst, valid, selected, target, attacker, trib, tribbed, onClick, onHover, label }) {
+  const bd = valid ? C.good : target ? C.bad : trib ? C.gold : tribbed ? C.gold : inst ? shade(C.line, 8) : C.line;
   return (
-    <div onClick={onClick} className={target ? "atktarget" : undefined}
-      style={{ width: 54, height: 78, flexShrink: 0, borderRadius: 5, display: "grid", placeItems: "center",
-        border: `1px ${inst ? "solid" : "dashed"} ${valid ? C.good : target ? C.bad : inst ? shade(C.line, 8) : C.line}`,
-        background: valid ? "rgba(79,191,123,.16)" : "rgba(255,255,255,.02)", cursor: valid || target || inst ? "pointer" : "default" }}>
+    <div onClick={onClick} className={target || trib ? "atktarget" : undefined}
+      style={{ position: "relative", width: 52, height: 75, flexShrink: 0, borderRadius: 5, display: "grid", placeItems: "center",
+        border: `1px ${inst ? "solid" : "dashed"} ${bd}`,
+        background: valid ? "rgba(79,191,123,.16)" : trib ? "rgba(232,184,75,.12)" : "rgba(255,255,255,.025)",
+        cursor: valid || target || trib || inst ? "pointer" : "default", boxShadow: tribbed ? `0 0 8px ${C.gold}` : "none" }}>
       {inst ? <DuelCard inst={inst} onClick={onClick} onHover={onHover} selected={selected} target={target} attacker={attacker} />
-        : <span className="mono" style={{ fontSize: 8, color: C.mute }}>{label}</span>}
+        : <span className="mono" style={{ fontSize: 8, color: shade(C.mute, -20) }}>{label}</span>}
+      {tribbed && <span className="mono" style={{ position: "absolute", top: 1, left: 2, fontSize: 8, fontWeight: 700, color: "#1a1206", background: C.gold, borderRadius: 3, padding: "0 3px" }}>TRB</span>}
     </div>
   );
 }
 
-function Pile({ label, list, onClick, onHover }) {
+function Pile({ label, list, onClick, onHover, accent }) {
   const top = list[list.length - 1];
   return (
     <button onClick={onClick} onMouseEnter={() => top && onHover?.(top)} onMouseLeave={() => onHover?.(null)}
-      style={{ width: 54, height: 78, flexShrink: 0, border: `1px solid ${C.line}`, borderRadius: 5, background: C.panel, cursor: "pointer", position: "relative", overflow: "hidden", padding: 0 }}>
+      style={{ width: 52, height: 75, flexShrink: 0, border: `1px solid ${accent ? shade(accent, -30) : C.line}`, borderRadius: 5, background: C.panel, cursor: "pointer", position: "relative", overflow: "hidden", padding: 0 }}>
       {top && <img src={IMG(top.card.id, true)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.45 }} onError={(e) => (e.target.style.opacity = 0)} />}
-      <span className="mono" style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 9, color: C.text, textShadow: "0 1px 3px #000", flexDirection: "column" }}>
+      <span className="mono" style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 8.5, color: accent || C.text, textShadow: "0 1px 3px #000", flexDirection: "column" }}>
         <b>{label}</b><br />{list.length}
       </span>
     </button>
   );
 }
 
-/* one player's half of the mat. Rendered identically for both players; the
-   parent rotates P2's copy 180° so each player's monsters sit against the
-   centre line and each hand faces its own player. Row order (centre → edge):
-   monsters, spell/trap, hand, life points. */
-function PlayerField({ p, P, game, onZone, canPlace, atkTarget, attackFrom, sel, setSel, setViewer, setHover, drawCard, shuffleDeck, changeLP, dmg, hideHand }) {
+/* one player's half of the mat, laid out like a Master Duel play field:
+   ┌ left col: Field Spell / Extra Deck ┐ ┌ centre: Monster row + Spell/Trap row ┐ ┌ right col: Deck / GY / Banish ┐
+   with the hand + life points along the player's edge. Rendered identically
+   for both players; the parent rotates P2's copy 180° so the monster rows meet
+   in the centre and each hand faces its own player. */
+function PlayerField({ p, P, game, onZone, canPlace, atkTarget, tribTarget, isTrib, attackFrom, sel, setSel, setViewer, setHover, drawCard, shuffleDeck, changeLP, dmg, hideHand }) {
   const pl = P[p];
   const active = p === game.active;
   const selMatch = (loc, idx) => sel && sel.p === p && sel.loc === loc && sel.idx === idx;
@@ -1179,39 +1347,51 @@ function PlayerField({ p, P, game, onZone, canPlace, atkTarget, attackFrom, sel,
 
   const monRow = [0, 1, 2, 3, 4].map((i) => (
     <Slot key={"m" + i} inst={pl.mzones[i]} valid={canPlace(p, "m", i)} target={atkTarget(p, "m", i)} attacker={isAtkFrom("m", i)}
+      trib={tribTarget(p, "m", i)} tribbed={isTrib(p, "m", i)}
       selected={selMatch("m", i)} onClick={() => onZone(p, "m", i)} onHover={setHover} label="M" />
   ));
   const stRow = [0, 1, 2, 3, 4].map((i) => (
     <Slot key={"s" + i} inst={pl.szones[i]} valid={canPlace(p, "s", i)} selected={selMatch("s", i)} onClick={() => onZone(p, "s", i)} onHover={setHover} label="S/T" />
   ));
-  const piles = (
-    <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
-      <Slot inst={pl.field} valid={canPlace(p, "field", 0)} selected={selMatch("field", 0)} onClick={() => onZone(p, "field", 0)} onHover={setHover} label="Field" />
-      <Pile label="GY" list={pl.gy} onClick={() => setViewer({ p, pile: "gy" })} onHover={setHover} />
-      <Pile label="Ban" list={pl.banish} onClick={() => setViewer({ p, pile: "banish" })} onHover={setHover} />
-      <Pile label="Extra" list={pl.extra} onClick={() => setViewer({ p, pile: "extra" })} onHover={setHover} />
-      <button onClick={() => drawCard(p)} style={{ width: 54, height: 78, border: `1px solid ${C.gold}`, borderRadius: 5, background: `linear-gradient(160deg, ${shade(C.gold, -30)}, #1a130a)`, cursor: "pointer", color: C.gold }} className="mono" title="Draw a card">
-        <div style={{ fontSize: 9 }}>DECK</div><div style={{ fontSize: 15, fontWeight: 700 }}>{pl.deck.length}</div><div style={{ fontSize: 8 }}>draw</div>
-      </button>
-      <button onClick={() => shuffleDeck(p)} style={miniBar()} title="Shuffle deck">⤨</button>
-      <button onClick={() => setViewer({ p, pile: "deck" })} style={miniBar()}>view</button>
+
+  const leftCol = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5, justifyContent: "center" }}>
+      <Slot inst={pl.field} valid={canPlace(p, "field", 0)} selected={selMatch("field", 0)} onClick={() => onZone(p, "field", 0)} onHover={setHover} label="FIELD" />
+      <Pile label="EXTRA" list={pl.extra} onClick={() => setViewer({ p, pile: "extra" })} onHover={setHover} accent={C.gold} />
+    </div>
+  );
+  const rightCol = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5, justifyContent: "center" }}>
+      <div style={{ display: "flex", gap: 4 }}>
+        <button onClick={() => drawCard(p)} style={{ width: 52, height: 75, border: `1px solid ${C.gold}`, borderRadius: 5, background: `linear-gradient(160deg, ${shade(C.gold, -30)}, #1a130a)`, cursor: "pointer", color: C.gold }} className="mono" title="Draw a card">
+          <div style={{ fontSize: 8 }}>DECK</div><div style={{ fontSize: 16, fontWeight: 700 }}>{pl.deck.length}</div><div style={{ fontSize: 7 }}>draw</div>
+        </button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, justifyContent: "center" }}>
+          <button onClick={() => shuffleDeck(p)} style={{ ...miniBar(), padding: "3px 6px" }} title="Shuffle deck">⤨</button>
+          <button onClick={() => setViewer({ p, pile: "deck" })} style={{ ...miniBar(), padding: "3px 6px", fontSize: 9 }}>view</button>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 4 }}>
+        <Pile label="GY" list={pl.gy} onClick={() => setViewer({ p, pile: "gy" })} onHover={setHover} />
+        <Pile label="BANISH" list={pl.banish} onClick={() => setViewer({ p, pile: "banish" })} onHover={setHover} />
+      </div>
     </div>
   );
 
   const lp = (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 4px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span className="mono" style={{ fontSize: 11, color: active ? C.gold : C.mute, fontWeight: 700 }}>{p === 0 ? "P1" : "P2"}</span>
+        <span className="disp" style={{ fontSize: 12, color: active ? C.gold : C.mute }}>{p === 0 ? "P1" : "P2"}</span>
         <button onClick={() => changeLP(p, -dmg)} style={{ ...miniBar(), color: C.bad, padding: "3px 7px" }}>−{dmg}</button>
-        <span key={pl.lp} className="mono lpnum" style={{ fontSize: 19, fontWeight: 700, color: pl.lp > 4000 ? C.good : pl.lp > 1500 ? C.gold : C.bad, minWidth: 60, textAlign: "center" }}>{pl.lp}</span>
+        <span key={pl.lp} className="mono lpnum" style={{ fontSize: 20, fontWeight: 700, color: pl.lp > 4000 ? C.good : pl.lp > 1500 ? C.gold : C.bad, minWidth: 62, textAlign: "center" }}>{pl.lp}</span>
         <button onClick={() => changeLP(p, dmg)} style={{ ...miniBar(), color: C.good, padding: "3px 7px" }}>+{dmg}</button>
       </div>
-      <span className="mono" style={{ fontSize: 9, color: pl.normalSummoned ? C.bad : C.mute }}>{pl.normalSummoned ? "normal summon used" : "normal summon ready"}</span>
+      <span className="mono" style={{ fontSize: 9, color: pl.normalSummoned ? C.bad : C.good }}>{pl.normalSummoned ? "● NS used" : "○ NS ready"}</span>
     </div>
   );
 
   const hand = (
-    <div style={{ display: "flex", gap: 4, justifyContent: "center", flexWrap: "wrap", minHeight: 74, padding: "2px 0" }}>
+    <div style={{ display: "flex", gap: 4, justifyContent: "center", flexWrap: "wrap", minHeight: 74, padding: "3px 0" }}>
       {pl.hand.map((inst, i) =>
         hideHand ? (
           <div key={inst.uid} style={{ width: 50, height: 73, borderRadius: 4, background: `repeating-linear-gradient(45deg, ${shade(C.gold, -30)} 0 4px, #14100a 4px 8px)`, border: `1px solid ${C.line}` }} />
@@ -1224,17 +1404,18 @@ function PlayerField({ p, P, game, onZone, canPlace, atkTarget, attackFrom, sel,
   );
 
   const board = (
-    <div style={{ display: "flex", gap: 14, alignItems: "center", justifyContent: "center", flexWrap: "wrap" }}>
+    <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "center", flexWrap: "wrap" }}>
+      {leftCol}
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         <div style={{ display: "flex", gap: 5 }}>{monRow}</div>
         <div style={{ display: "flex", gap: 5 }}>{stRow}</div>
       </div>
-      {piles}
+      {rightCol}
     </div>
   );
 
   return (
-    <div style={{ background: active ? "rgba(232,184,75,.06)" : "transparent", borderRadius: 10, padding: "8px 10px", border: `1px solid ${active ? shade(C.gold, -45) : "transparent"}`, transition: "background .3s" }}>
+    <div style={{ background: active ? "rgba(232,184,75,.06)" : "transparent", borderRadius: 10, padding: "6px 8px", border: `1px solid ${active ? shade(C.gold, -45) : "transparent"}`, transition: "background .3s" }}>
       {board}
       {hand}
       {lp}
@@ -1242,13 +1423,14 @@ function PlayerField({ p, P, game, onZone, canPlace, atkTarget, attackFrom, sel,
   );
 }
 
-function EMZRow({ game, onZone, canPlace, atkTarget, sel, setHover }) {
+function EMZRow({ game, onZone, canPlace, atkTarget, tribTarget, isTrib, sel, setHover }) {
   return (
     <div style={{ display: "flex", gap: 34, justifyContent: "center", alignItems: "center", padding: "3px 0", borderTop: `1px dashed ${shade(C.good, -55)}`, borderBottom: `1px dashed ${shade(C.good, -55)}` }}>
       <span className="mono" style={{ fontSize: 8, color: shade(C.good, 30), letterSpacing: ".12em" }}>◄ EXTRA MONSTER ZONES</span>
       {[0, 1].map((i) => (
         <Slot key={i} inst={game.emz[i]?.inst} valid={canPlace(0, "emz", i) || canPlace(1, "emz", i)}
           target={atkTarget(0, "emz", i) || atkTarget(1, "emz", i)}
+          trib={tribTarget(0, "emz", i) || tribTarget(1, "emz", i)} tribbed={isTrib(0, "emz", i) || isTrib(1, "emz", i)}
           selected={sel && sel.loc === "emz" && sel.idx === i}
           onClick={() => { const e = game.emz[i]; onZone(e ? e.owner : (sel?.p ?? game.active), "emz", i); }} onHover={setHover} label="EMZ" />
       ))}

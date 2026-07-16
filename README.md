@@ -20,21 +20,26 @@ page, serve the folder instead:
     npm run build      # outputs to dist/ (deploy to GitHub Pages, etc.)
 
 ## What's inside
-- **Deck Editor** — live card search + filters, real art, .ydk import/export,
-  saved decks. New releases appear as soon as they're in the database.
-- **Duel** — manual hot-seat board: both players, all zones (monster / S&T /
-  field / 2 shared Extra Monster Zones / GY / banish / deck / Extra), card
-  state (ATK/DEF/face-down/set), phases, life points, coin/dice, game log,
-  multi-level undo. You apply effects; the board tracks structure.
+- **Deck Editor** — Master Duel-style layout: a full card inspector, the deck
+  as an image grid, and a searchable pool. Uses open Master Duel data
+  (MD-legal card set, `md_rarity`, TCG/OCG banlist) via YGOPRODeck, with an
+  **MD only** toggle. Real art, .ydk import/export, saved decks.
+- **Duel** — hot-seat board arranged like a Master Duel field (zones in the
+  centre, each hand facing its player). The engine enforces the rules:
+  turn/phase flow with auto-draw, the once-per-turn Normal Summon, tribute
+  costs (1 for Lv5–6, 2 for Lv7+), automatic battle damage, and win by LP-0
+  or deck-out. Click-to-attack, hover-to-preview, full log, multi-level undo.
 - **Test Hand** — 3D pop-out cards; draw and mulligan.
 - **Probability** — Monte-Carlo opening simulator (open-rate, brick-rate,
   distribution).
 
 ## Scope note
-The duel board does **not** auto-resolve card effects or enforce legality —
-that's the manual tier (like Dueling Book). Automated rules enforcement is a
-separate project built on the ocgcore (ygopro-core) engine + community card
-scripts.
+The engine automates the **game rules** (phases, summons, tributes, battle,
+win conditions) — but you still apply individual card **effects** yourself.
+Full effect automation (every card resolving itself, as in Master Duel proper)
+requires the ocgcore / ygopro-core engine plus its community card scripts, a
+separate project. This is the practical middle tier between Dueling Book
+(fully manual) and Master Duel (fully automated).
 
 ## Data / attribution
 Card data & images: YGOPRODeck API — https://ygoprodeck.com/api-guide/
