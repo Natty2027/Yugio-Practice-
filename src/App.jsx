@@ -11,6 +11,9 @@ const IMG = (id, small) =>
   `https://images.ygoprodeck.com/images/cards${small ? "_small" : ""}/${id}.jpg`;
 const IMG_CROP = (id) =>
   `https://images.ygoprodeck.com/images/cards_cropped/${id}.jpg`;
+/* cached, CORS-friendly image proxy — used as a fallback when the YGOPRODeck
+   CDN throttles direct hotlinks (it rate-limits and asks you not to hotlink) */
+const imgProxy = (u) => `https://images.weserv.nl/?url=${encodeURIComponent(u.replace(/^https?:\/\//, ""))}`;
 
 const REDUCED = typeof window !== "undefined" &&
   window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -275,6 +278,29 @@ function normalize(c) {
     banOcg: c.banlist_info?.ban_ocg ?? null,
   };
 }
+/* resilient card image: tries the CDN, then a cached proxy, then a labelled
+   placeholder — so a throttled/failed load never leaves a blank card */
+function CardImg({ id, variant = "small", name = "", frameType = "", style, className, onClick, title }) {
+  const primary = variant === "crop" ? IMG_CROP(id) : IMG(id, variant === "small");
+  const chain = variant === "crop"
+    ? [primary, imgProxy(primary), IMG(id), imgProxy(IMG(id))]
+    : [primary, imgProxy(primary)];
+  const [i, setI] = useState(0);
+  if (i >= chain.length) {
+    const f = FRAME[frameKey(frameType)];
+    return (
+      <div className={className} onClick={onClick} title={title || name}
+        style={{ ...style, display: "grid", placeItems: "center", textAlign: "center", overflow: "hidden",
+          background: `linear-gradient(155deg, ${shade(f.bg, 10)}, ${shade(f.bg, -34)})`, color: f.fg, fontSize: 8, lineHeight: 1.2, padding: "0 4px" }}>
+        {name}
+      </div>
+    );
+  }
+  return (
+    <img src={chain[i]} alt={name} title={title || name} loading="lazy" referrerPolicy="no-referrer"
+      className={className} style={style} onClick={onClick} onError={() => setI((v) => v + 1)} />
+  );
+}
 /* short rarity tag + colour for the Master Duel rarity gems */
 const RARITY = {
   "Ultra Rare": { t: "UR", c: "#e8b84b" },
@@ -490,7 +516,7 @@ function CardInspector({ card }) {
   return (
     <div>
       <div style={{ borderRadius: 8, overflow: "hidden", border: `2px solid ${f.bg}`, boxShadow: `0 8px 26px rgba(0,0,0,.55)` }}>
-        <img src={IMG(card.id)} alt={card.name} style={{ width: "100%", display: "block", background: MD.panel2 }} onError={(e) => (e.target.style.visibility = "hidden")} />
+        <CardImg id={card.id} variant="full" name={card.name} frameType={card.frameType} style={{ width: "100%", aspectRatio: "0.686", display: "block", background: MD.panel2, objectFit: "cover" }} />
       </div>
       <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
         <span style={{ fontSize: 14, fontWeight: 800, lineHeight: 1.2 }}>{card.name}</span>
@@ -549,15 +575,10 @@ function DeckSection({ title, count, min, max, groups, onRemove, onHover }) {
 
 function DeckCell({ card, n, onRemove, onHover }) {
   const f = FRAME[frameKey(card.frameType)];
-  const [ok, setOk] = useState(true);
   return (
     <button onClick={onRemove} onMouseEnter={onHover} title={`${card.name} — click to remove one`}
       className="cardimg" style={{ position: "relative", border: `1px solid ${shade(f.bg, 10)}`, borderRadius: 5, overflow: "hidden", padding: 0, aspectRatio: "0.686", background: `linear-gradient(155deg, ${shade(f.bg, 8)}, ${shade(f.bg, -36)})`, cursor: "pointer" }}>
-      {ok ? (
-        <img src={IMG(card.id, true)} alt={card.name} loading="lazy" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} onError={() => setOk(false)} />
-      ) : (
-        <div className="disp" style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", fontSize: 8, color: f.fg, padding: "0 4px", textAlign: "center", lineHeight: 1.25 }}>{card.name}</div>
-      )}
+      <CardImg id={card.id} variant="small" name={card.name} frameType={card.frameType} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
       {n > 1 && <span className="mono" style={{ position: "absolute", bottom: 2, right: 2, background: "rgba(0,0,0,.78)", color: MD.gold, fontSize: 10, fontWeight: 700, borderRadius: 4, padding: "0 4px" }}>×{n}</span>}
     </button>
   );
@@ -566,18 +587,11 @@ function DeckCell({ card, n, onRemove, onHover }) {
 function CardTile({ card, badge, onClick, onHover }) {
   const f = FRAME[frameKey(card.frameType)];
   const rar = card.rarity ? RARITY[card.rarity] : null;
-  const [ok, setOk] = useState(true);
   return (
     <button onClick={onClick} onMouseEnter={onHover} title={card.name}
       style={{ position: "relative", border: "none", background: "transparent", padding: 0 }}>
       <div className="cardimg" style={{ aspectRatio: "0.686", borderRadius: 5, overflow: "hidden", border: `1px solid ${f.bg}`, background: `linear-gradient(155deg, ${shade(f.bg, 10)}, ${shade(f.bg, -34)})` }}>
-        {ok ? (
-          <img src={IMG(card.id, true)} alt={card.name} loading="lazy"
-            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-            onError={() => setOk(false)} />
-        ) : (
-          <div className="disp" style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", textAlign: "center", fontSize: 8, color: f.fg, padding: "0 4px", lineHeight: 1.3 }}>{card.name}</div>
-        )}
+        <CardImg id={card.id} variant="small" name={card.name} frameType={card.frameType} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
       </div>
       {rar && <span className="mono" style={{ position: "absolute", bottom: 2, left: 2, background: rar.c, color: "#1a1206", fontSize: 8, fontWeight: 700, borderRadius: 3, padding: "0 3px" }}>{rar.t}</span>}
       {badge > 0 && (
@@ -779,7 +793,7 @@ function Probability({ main }) {
               <button key={card.name} onClick={() => toggle(card.name)}
                 style={{ display: "flex", alignItems: "center", gap: 9, textAlign: "left", background: on ? "rgba(232,184,75,.12)" : C.panel, border: `1px solid ${on ? C.gold : "transparent"}`, borderRadius: 6, padding: "5px 8px" }}>
                 <span style={{ width: 15, height: 15, borderRadius: 4, border: `1.5px solid ${on ? C.gold : C.line}`, background: on ? C.gold : "transparent", flexShrink: 0, color: "#1a1206", fontSize: 11, textAlign: "center", lineHeight: "13px" }}>{on ? "✓" : ""}</span>
-                <img src={IMG(card.id, true)} alt="" width="22" height="32" style={{ borderRadius: 2, objectFit: "cover" }} onError={(e) => (e.target.style.visibility = "hidden")} />
+                <CardImg id={card.id} variant="small" name="" frameType={card.frameType} style={{ width: 22, height: 32, borderRadius: 2, objectFit: "cover" }} />
                 <span style={{ flex: 1, fontSize: 12.5, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: on ? C.text : C.mute }}>{card.name}</span>
                 <span className="mono" style={{ fontSize: 11, color: C.mute }}>×{n}</span>
               </button>
@@ -904,6 +918,91 @@ function placeInst(n, p, kind, idx, inst, pos) {
   else if (kind === "emz") n.emz[idx] = { inst, owner: p };
 }
 
+/* ---- heuristic AI + move coach (rules-level; effects stay manual) ------ */
+const ownMonsters = (g, p) => {
+  const out = [];
+  g.players[p].mzones.forEach((m, i) => m && out.push({ p, loc: "m", idx: i, inst: m }));
+  g.emz.forEach((e, i) => e && e.owner === p && out.push({ p, loc: "emz", idx: i, inst: e.inst }));
+  return out;
+};
+/* best Normal Summon for player p: highest-ATK main-deck monster that's
+   summonable now (tributing lowest-ATK monsters only when it's an upgrade) */
+function aiBestSummon(g, p) {
+  const pl = g.players[p];
+  if (pl.normalSummoned) return null;
+  const field = ownMonsters(g, p);
+  const emptyMZ = pl.mzones.filter((z) => !z).length;
+  const cands = [];
+  pl.hand.forEach((inst, hi) => {
+    const c = inst.card;
+    const isMon = frameKey(c.frameType) && !/spell|trap/.test(c.frameType || "");
+    if (!isMon || isExtra(c.frameType)) return;
+    const need = tributesFor(c);
+    if (need === 0) { if (emptyMZ > 0) cands.push({ handIdx: hi, tributes: [], atk: c.atk ?? 0, need }); }
+    else if (field.length >= need) {
+      const trib = [...field].sort((a, b) => (a.inst.card.atk ?? 0) - (b.inst.card.atk ?? 0)).slice(0, need).map((o) => o.idx);
+      cands.push({ handIdx: hi, tributes: trib, atk: c.atk ?? 0, need });
+    }
+  });
+  if (!cands.length) return null;
+  cands.sort((a, b) => b.atk - a.atk);
+  const best = cands[0];
+  if (best.need > 0) {
+    const maxField = Math.max(0, ...field.map((o) => o.inst.card.atk ?? 0));
+    if (best.atk <= maxField) return null; // not worth tributing down
+  }
+  return { ...best, pos: "atk" };
+}
+/* choose an attack for attacker aSel: destroy the biggest thing it safely
+   beats, attack directly if the lane is open, otherwise hold back */
+function aiPickAttack(g, me, aSel) {
+  const opp = 1 - me, aAtk = getAt(g, aSel).card.atk ?? 0;
+  const targets = ownMonsters(g, opp);
+  if (!targets.length) return { kind: "direct" };
+  let best = null, bestScore = -Infinity;
+  targets.forEach((t) => {
+    const def = t.inst.pos === "atk" ? (t.inst.card.atk ?? 0) : (t.inst.card.def ?? 0);
+    let score;
+    if (t.inst.pos === "atk") score = aAtk > def ? 100 + (aAtk - def) : aAtk === def ? -50 : -100 - (def - aAtk);
+    else score = aAtk > def ? 60 + (aAtk - def) : aAtk === def ? -10 : -80 - (def - aAtk);
+    if (score > bestScore) { bestScore = score; best = t; }
+  });
+  if (bestScore < 0) return { kind: "skip" };
+  return { kind: "battle", tSel: { p: opp, loc: best.loc, idx: best.idx } };
+}
+const getAt = (g, s) => s.loc === "emz" ? g.emz[s.idx]?.inst : g.players[s.p][s.loc + "zones"][s.idx];
+
+/* coaching tips for the human (player 0) at the current state */
+function coachTips(g) {
+  if (!g || g.winner != null) return [];
+  const me = 0, opp = 1, pl = g.players[me], op = g.players[opp];
+  if (g.active !== me) return [{ t: "info", m: "Opponent's turn — watch for their attacks and set traps if you have them." }];
+  const tips = [];
+  const atkMons = ownMonsters(g, me).filter((o) => o.inst.pos === "atk");
+  const oppMons = ownMonsters(g, opp);
+  const mainPhase = g.phase === "M1" || g.phase === "M2";
+  if (mainPhase && !pl.normalSummoned) {
+    const best = aiBestSummon(g, me);
+    if (best) { const c = pl.hand[best.handIdx].card; tips.push({ t: "good", m: `Normal Summon ${c.name} (ATK ${c.atk ?? 0})${best.tributes.length ? ` — tribute ${best.tributes.length}` : ""}.` }); }
+    else if (pl.hand.some((i) => /trap/i.test(i.card.type || ""))) tips.push({ t: "info", m: "Set a Trap face-down to protect your board." });
+  }
+  if (g.phase !== "BP" && g.turn > 1 && atkMons.some((o) => !o.inst.attacked)) tips.push({ t: "info", m: "Advance to the Battle Phase (Next ▸) to attack." });
+  if (g.phase === "BP") {
+    const unatt = atkMons.filter((o) => !o.inst.attacked);
+    const total = unatt.reduce((s, o) => s + (o.inst.card.atk ?? 0), 0);
+    if (!oppMons.length && unatt.length) tips.push({ t: "good", m: total >= op.lp ? `LETHAL — attack directly for ${total} (they have ${op.lp} LP).` : `Open field — attack directly for ${total} damage.` });
+    unatt.forEach((o) => {
+      const a = o.inst.card.atk ?? 0;
+      if (!oppMons.length) return;
+      const beatable = oppMons.filter((t) => (t.inst.pos === "atk" ? (t.inst.card.atk ?? 0) : (t.inst.card.def ?? 0)) < a);
+      if (beatable.length) { const big = beatable.sort((x, y) => (y.inst.card.atk ?? 0) - (x.inst.card.atk ?? 0))[0]; tips.push({ t: "good", m: `${o.inst.card.name} (ATK ${a}) can safely destroy ${big.inst.card.name}.` }); }
+      else { const small = [...oppMons].sort((x, y) => (x.inst.card.atk ?? 0) - (y.inst.card.atk ?? 0))[0]; if (small.inst.pos === "atk" && (small.inst.card.atk ?? 0) > a) tips.push({ t: "warn", m: `Hold ${o.inst.card.name} (ATK ${a}) — every enemy monster is bigger; attacking loses LP.` }); }
+    });
+  }
+  if (!tips.length) tips.push({ t: "info", m: "No forced play — develop your board, then pass with End Turn." });
+  return tips;
+}
+
 function DuelBoard({ main, extra }) {
   const [game, setGame] = useState(null);
   const [sel, setSel] = useState(null);
@@ -911,9 +1010,20 @@ function DuelBoard({ main, extra }) {
   const [attackFrom, setAttackFrom] = useState(null); // {p,loc,idx} of attacking monster
   const [hover, setHover] = useState(null);            // instance under the cursor
   const [viewer, setViewer] = useState(null);
-  const [hideHands, setHideHands] = useState(false);
+  const [hideHands, setHideHands] = useState(true);
   const [dmg, setDmg] = useState(1000);
+  const [vsAI, setVsAI] = useState(true);              // P2 auto-plays
+  const [coach, setCoach] = useState(true);            // show move suggestions
   const hist = useRef([]);
+  const aiTickRef = useRef(() => {});
+
+  /* drive the AI: when it's P2's turn, take one action on a short timer so
+     the player can watch it play out. aiTickRef is refreshed each render. */
+  useEffect(() => {
+    if (!vsAI || !game || game.winner != null || game.active !== 1 || pending || attackFrom) return;
+    const t = setTimeout(() => aiTickRef.current(), 650);
+    return () => clearTimeout(t);
+  }, [vsAI, game, pending, attackFrom]);
 
   const start = () => {
     UID = 0;
@@ -1014,13 +1124,13 @@ function DuelBoard({ main, extra }) {
   const oppMonsters = (opp) =>
     P[opp].mzones.some(Boolean) || game.emz.some((e) => e && e.owner === opp);
 
-  const resolveAttack = (tSel) => {
-    const aInst = getInst(attackFrom), tInst = getInst(tSel);
+  /* explicit attacker+target so both the human UI and the AI can call it */
+  const resolveBattle = (aSel, tSel) => {
+    const aInst = getInst(aSel), tInst = getInst(tSel);
     if (!aInst || !tInst) { setAttackFrom(null); return; }
-    const aP = attackFrom.p, tP = tSel.p, aAtk = aInst.card.atk ?? 0;
+    const aP = aSel.p, tP = tSel.p, aAtk = aInst.card.atk ?? 0;
     const aName = aInst.card.name, tName = tInst.card.name;
     const bury = (n, s) => { const x = pull(n, s); if (x) { x.pos = "atk"; n.players[s.p].gy.push(x); } };
-    /* resolve up front so we can log the outcome and mutate deterministically */
     let killA = false, killT = false, dmgTo = null, dmgAmt = 0, msg;
     if (tInst.pos === "atk") {
       const tAtk = tInst.card.atk ?? 0;
@@ -1034,20 +1144,22 @@ function DuelBoard({ main, extra }) {
       else { msg = `⚔ ${aName} bounces off ${tName} (${aAtk} = DEF ${tDef})`; }
     }
     commit((n) => {
-      const A = getInstMut(n, attackFrom); if (A) A.attacked = true;
+      const A = getInstMut(n, aSel); if (A) A.attacked = true;
       if (dmgTo != null) n.players[dmgTo].lp = Math.max(0, n.players[dmgTo].lp - dmgAmt);
       if (killT) bury(n, tSel);
-      if (killA) bury(n, attackFrom);
+      if (killA) bury(n, aSel);
     }, msg);
     setAttackFrom(null);
   };
-  const directAttack = () => {
-    const aInst = getInst(attackFrom); if (!aInst) { setAttackFrom(null); return; }
-    const aP = attackFrom.p, oppP = 1 - aP, dealt = aInst.card.atk ?? 0;
-    commit((n) => { const A = getInstMut(n, attackFrom); if (A) A.attacked = true; n.players[oppP].lp = Math.max(0, n.players[oppP].lp - dealt); },
+  const resolveDirect = (aSel) => {
+    const aInst = getInst(aSel); if (!aInst) { setAttackFrom(null); return; }
+    const oppP = 1 - aSel.p, dealt = aInst.card.atk ?? 0;
+    commit((n) => { const A = getInstMut(n, aSel); if (A) A.attacked = true; n.players[oppP].lp = Math.max(0, n.players[oppP].lp - dealt); },
       `⚔ ${aInst.card.name} attacks directly — ${plabel(oppP)} takes ${dealt}`);
     setAttackFrom(null);
   };
+  const resolveAttack = (tSel) => resolveBattle(attackFrom, tSel);   // human path
+  const directAttack = () => resolveDirect(attackFrom);
 
   const onZone = (p, kind, idx) => {
     if (attackFrom) { if (atkTarget(p, kind, idx)) resolveAttack({ p, loc: kind, idx }); return; }
@@ -1166,9 +1278,50 @@ function DuelBoard({ main, extra }) {
   const coin = () => commit(() => {}, `🪙 Coin: ${Math.random() < 0.5 ? "Heads" : "Tails"}`);
   const dice = () => commit(() => {}, `🎲 Dice: ${1 + Math.floor(Math.random() * 6)}`);
 
+  /* ---- AI opponent (P2): one action per tick ---- */
+  const aiSummon = (cand) => {
+    const me = 1;
+    const name = game.players[me].hand[cand.handIdx]?.card.name || "a monster";
+    commit((n) => {
+      const pl = n.players[me];
+      cand.tributes.forEach((zi) => { const x = pl.mzones[zi]; if (x) { pl.mzones[zi] = null; x.pos = "atk"; pl.gy.push(x); } });
+      const inst = pl.hand.splice(cand.handIdx, 1)[0]; if (!inst) return;
+      inst.pos = cand.pos; inst.attacked = false;
+      let zi = pl.mzones.findIndex((z) => !z);
+      if (zi < 0) zi = cand.tributes[0] ?? 0;
+      pl.mzones[zi] = inst;
+      pl.normalSummoned = true;
+    }, `P2 Normal Summoned ${name}${cand.tributes.length ? ` (tributing ${cand.tributes.length})` : ""}`);
+  };
+  const aiTick = () => {
+    const g = game, me = 1;
+    if (!g || g.winner != null || g.active !== me) return;
+    if (g.phase === "DP" || g.phase === "SP" || g.phase === "M2") { nextPhase(); return; }
+    if (g.phase === "EP") { endTurn(); return; }
+    if (g.phase === "M1") {
+      const cand = aiBestSummon(g, me);
+      if (cand) { aiSummon(cand); return; }
+      nextPhase(); return; // → Battle
+    }
+    if (g.phase === "BP") {
+      const attacker = ownMonsters(g, me).find((o) => o.inst.pos === "atk" && !o.inst.attacked);
+      if (attacker) {
+        const aSel = { p: me, loc: attacker.loc, idx: attacker.idx };
+        const dec = aiPickAttack(g, me, aSel);
+        if (dec.kind === "direct") resolveDirect(aSel);
+        else if (dec.kind === "battle") resolveBattle(aSel, dec.tSel);
+        else commit((n) => { const A = getInstMut(n, aSel); if (A) A.attacked = true; }, `P2's ${attacker.inst.card.name} holds back`);
+        return;
+      }
+      nextPhase(); return; // → Main 2
+    }
+  };
+  aiTickRef.current = aiTick;
+
   const selInst = getInst(sel);
   const previewInst = hover || selInst;
   const attackerInst = getInst(attackFrom);
+  const tips = coach ? coachTips(game) : [];
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 272px", height: "calc(100vh - 60px)" }}>
@@ -1189,6 +1342,8 @@ function DuelBoard({ main, extra }) {
           <button onClick={undo} style={miniBar()}>↩ Undo</button>
           <button onClick={coin} style={miniBar()}>🪙</button>
           <button onClick={dice} style={miniBar()}>🎲</button>
+          <button onClick={() => setVsAI((v) => !v)} style={{ ...miniBar(), borderColor: vsAI ? C.good : C.line, color: vsAI ? C.good : C.mute }}>🤖 AI {vsAI ? "on" : "off"}</button>
+          <button onClick={() => setCoach((v) => !v)} style={{ ...miniBar(), borderColor: coach ? C.gold : C.line, color: coach ? C.gold : C.mute }}>🎓 Coach {coach ? "on" : "off"}</button>
           <button onClick={() => setHideHands((h) => !h)} style={miniBar()}>{hideHands ? "Show P2 hand" : "Hide P2 hand"}</button>
           <button onClick={start} style={{ ...miniBar(), color: C.bad }}>Reset</button>
         </div>
@@ -1230,7 +1385,7 @@ function DuelBoard({ main, extra }) {
         <div style={{ padding: 12, borderBottom: `1px solid ${C.line}` }}>
           {previewInst ? (
             <div style={{ display: "flex", gap: 10 }}>
-              <img src={IMG(previewInst.card.id)} alt="" width="88" style={{ borderRadius: 5, objectFit: "cover", flexShrink: 0, background: C.panel2, alignSelf: "flex-start" }} onError={(e) => (e.target.style.visibility = "hidden")} />
+              <CardImg id={previewInst.card.id} variant="full" name={previewInst.card.name} frameType={previewInst.card.frameType} style={{ width: 88, aspectRatio: "0.686", borderRadius: 5, objectFit: "cover", flexShrink: 0, background: C.panel2, alignSelf: "flex-start" }} />
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.25 }}>{previewInst.card.name}</div>
                 <div className="mono" style={{ fontSize: 10, color: FRAME[frameKey(previewInst.card.frameType)].bg, marginTop: 3, textTransform: "uppercase", letterSpacing: ".04em" }}>
@@ -1257,6 +1412,18 @@ function DuelBoard({ main, extra }) {
             </div>
           )}
         </div>
+        {coach && tips.length > 0 && (
+          <div style={{ padding: "8px 12px", borderBottom: `1px solid ${C.line}`, background: hexA(C.gold, 0.04) }}>
+            <div className="disp" style={{ fontSize: 10, color: C.gold, marginBottom: 6 }}>🎓 Trainer{vsAI ? " · vs AI" : ""}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {tips.map((tip, i) => (
+                <div key={i} className="mono" style={{ fontSize: 10.5, lineHeight: 1.35, color: tip.t === "good" ? C.good : tip.t === "warn" ? C.bad : C.mute, display: "flex", gap: 6 }}>
+                  <span>{tip.t === "good" ? "✓" : tip.t === "warn" ? "⚠" : "•"}</span><span>{tip.m}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <div style={{ padding: "8px 12px", flex: 1, overflowY: "auto", minHeight: 0 }}>
           <div className="disp" style={{ fontSize: 10, color: C.mute, marginBottom: 6 }}>Game Log</div>
           {[...game.log].reverse().map((e, i) => (
@@ -1302,7 +1469,7 @@ function DuelCard({ inst, onClick, onHover, selected, target, attacker }) {
             <div style={{ width: "40%", height: "40%", transform: "rotate(45deg)", background: `linear-gradient(${C.gold}, ${C.goldDim})`, borderRadius: 3, opacity: 0.85 }} />
           </div>
         ) : (
-          <img src={IMG(c.id, true)} alt={c.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => (e.target.style.opacity = 0)} />
+          <CardImg id={c.id} variant="small" name={c.name} frameType={c.frameType} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         )}
         {!back && isMon && c.atk != null && (
           <span className="mono" style={{ position: "absolute", left: 0, right: 0, bottom: 0, fontSize: 8, textAlign: "center", color: "#fff", background: "rgba(0,0,0,.62)", letterSpacing: ".02em" }}>
@@ -1336,7 +1503,7 @@ function Pile({ label, list, onClick, onHover, accent }) {
   return (
     <button onClick={onClick} onMouseEnter={() => top && onHover?.(top)} onMouseLeave={() => onHover?.(null)}
       style={{ width: 52, height: 75, flexShrink: 0, border: `1px solid ${accent ? shade(accent, -30) : C.line}`, borderRadius: 5, background: C.panel, cursor: "pointer", position: "relative", overflow: "hidden", padding: 0 }}>
-      {top && <img src={IMG(top.card.id, true)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.45 }} onError={(e) => (e.target.style.opacity = 0)} />}
+      {top && <CardImg id={top.card.id} variant="small" name="" frameType={top.card.frameType} style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.45 }} />}
       <span className="mono" style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 8.5, color: accent || C.text, textShadow: "0 1px 3px #000", flexDirection: "column" }}>
         <b>{label}</b><br />{list.length}
       </span>
@@ -1415,16 +1582,22 @@ function PlayerField({ p, P, game, onZone, canPlace, atkTarget, tribTarget, isTr
     </div>
   );
 
+  const nH = pl.hand.length, midH = (nH - 1) / 2;
   const hand = (
-    <div style={{ display: "flex", gap: 4, justifyContent: "center", flexWrap: "wrap", minHeight: 74, padding: "3px 0" }}>
-      {pl.hand.map((inst, i) =>
-        hideHand ? (
-          <div key={inst.uid} style={{ width: 50, height: 73, borderRadius: 4, background: `repeating-linear-gradient(45deg, ${shade(C.gold, -30)} 0 4px, #14100a 4px 8px)`, border: `1px solid ${C.line}` }} />
+    <div style={{ display: "flex", gap: 2, justifyContent: "center", alignItems: "flex-end", flexWrap: "nowrap", overflowX: "auto", overflowY: "hidden", minHeight: 84, padding: "8px 4px 2px" }}>
+      {pl.hand.map((inst, i) => {
+        const rot = nH > 1 ? (i - midH) * 3.2 : 0;          // gentle fan
+        const lift = nH > 1 ? Math.abs(i - midH) * 3 : 0;   // arc: middle sits highest
+        const wrap = { transform: `rotate(${rot}deg) translateY(${lift}px)`, transformOrigin: "bottom center", flex: "0 0 auto", transition: "transform .15s" };
+        return hideHand ? (
+          <div key={inst.uid} style={{ ...wrap, width: 50, height: 73, borderRadius: 4, background: `repeating-linear-gradient(45deg, ${shade(C.gold, -30)} 0 4px, #14100a 4px 8px)`, border: `1px solid ${C.line}` }} />
         ) : (
-          <DuelCard key={inst.uid} inst={inst} onClick={() => setSel({ p, loc: "hand", idx: i })} onHover={setHover} selected={selMatch("hand", i)} />
-        )
-      )}
-      {pl.hand.length === 0 && <span className="mono" style={{ fontSize: 10, color: C.mute, alignSelf: "center" }}>empty hand</span>}
+          <div key={inst.uid} style={wrap}>
+            <DuelCard inst={inst} onClick={() => setSel({ p, loc: "hand", idx: i })} onHover={setHover} selected={selMatch("hand", i)} />
+          </div>
+        );
+      })}
+      {nH === 0 && <span className="mono" style={{ fontSize: 10, color: C.mute, alignSelf: "center" }}>empty hand</span>}
     </div>
   );
 
@@ -1481,7 +1654,7 @@ function PileViewer({ game, viewer, setViewer, setSel, sel, actionsFor, plabel }
             {list.map((inst, i) => (
               <button key={inst.uid} onClick={() => setSel({ p: viewer.p, loc: viewer.pile, idx: i })}
                 style={{ border: `2px solid ${selHere && sel.idx === i ? C.gold : "transparent"}`, borderRadius: 5, padding: 0, background: "none", cursor: "pointer" }}>
-                <img src={IMG(inst.card.id, true)} alt={inst.card.name} style={{ width: "100%", borderRadius: 4, display: "block" }} onError={(e) => (e.target.style.opacity = 0)} />
+                <CardImg id={inst.card.id} variant="small" name={inst.card.name} frameType={inst.card.frameType} style={{ width: "100%", aspectRatio: "0.686", borderRadius: 4, display: "block", objectFit: "cover" }} />
               </button>
             ))}
             {list.length === 0 && <span className="mono" style={{ fontSize: 11, color: C.mute }}>empty</span>}
