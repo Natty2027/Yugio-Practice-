@@ -327,7 +327,7 @@ export default function App() {
           addCard={addCard} removeOne={removeOne} countOf={countOf} flash={flash} />
       )}
       {tab === "duel" && <DuelBoard main={main} extra={extra} />}
-      {tab === "auto" && <EngineBeta main={main} />}
+      {tab === "auto" && <EngineBeta main={main} extra={extra} />}
       {tab === "hand" && <HandTester main={main} />}
       {tab === "stats" && <Probability main={main} />}
 
@@ -1808,11 +1808,113 @@ const loadScript = (src) => new Promise((res, rej) => {
   document.head.appendChild(el);
 });
 
-function EngineBeta({ main }) {
+function EngineBeta({ main, extra }) {
   const [steps, setSteps] = useState([]);
   const [running, setRunning] = useState(false);
+  const [duelLog, setDuelLog] = useState([]);
+  const [duelBusy, setDuelBusy] = useState(false);
   const dbRef = useRef(null);
   const set = (i, patch) => setSteps((s) => s.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+
+  /* ensure sql.js + cards.cdb are loaded, return the SQLite handle */
+  const ensureDb = async () => {
+    if (dbRef.current) return dbRef.current;
+    await loadScript(ENGINE.sqljsScript);
+    const SQL = await window.initSqlJs({ locateFile: () => ENGINE.sqlWasm });
+    const buf = await (await fetch(ENGINE.cdb)).arrayBuffer();
+    dbRef.current = new SQL.Database(new Uint8Array(buf));
+    return dbRef.current;
+  };
+
+  /* Phase 2 — load the deck into the real engine, start a duel, run the
+     effect-resolving message loop until it needs a player decision. */
+  const runDuel = async () => {
+    setDuelBusy(true); setDuelLog([]);
+    const log = (s) => setDuelLog((l) => [...l, s]);
+    try {
+      if (!main.length) throw new Error("Build a deck first (Deck Editor tab).");
+      log("Loading card database…");
+      const db = await ensureDb();
+      log("Loading engine core (sync)…");
+      const mod = await import(/* @vite-ignore */ ENGINE.core);
+      const createCore = mod.default || mod.createCore;
+      if (typeof createCore !== "function") throw new Error("createCore not found");
+      const L = mod.OcgLocation || { DECK: 1, EXTRA: 64 };
+      const POS = mod.OcgPosition || { FACEDOWN_DEFENSE: 8 };
+      const PR = mod.OcgProcessResult || { END: 0, WAITING: 1, CONTINUE: 2 };
+      const MODE = mod.OcgDuelMode || {};
+      const names = mod.ocgMessageTypeStrings;
+      const core = await createCore({ sync: true });
+
+      const scriptCache = new Map();
+      const cardReader = (code) => {
+        const r = db.exec(`SELECT id,alias,CAST(setcode AS TEXT) sc,type,atk,def,level,CAST(race AS TEXT) rc,attribute FROM datas WHERE id=${code}`);
+        const v = r?.[0]?.values?.[0];
+        if (!v) return null;
+        const [id, alias, sc, type, atk, def, level, rc, attribute] = v;
+        const t = Number(type) >>> 0;
+        const isLink = !!(t & 0x4000000);
+        const lv = Number(level) >>> 0;
+        const setBig = BigInt(sc || "0");
+        const setcodes = [];
+        for (let i = 0n; i < 4n; i++) { const s = Number((setBig >> (16n * i)) & 0xffffn); if (s) setcodes.push(s); }
+        return {
+          code: Number(id), alias: Number(alias) || 0, setcodes, type: t,
+          level: lv & 0xff, attribute: Number(attribute) || 0, race: BigInt(rc || "0"),
+          attack: Number(atk) || 0, defense: isLink ? 0 : (Number(def) || 0),
+          lscale: (lv >> 24) & 0xff, rscale: (lv >> 16) & 0xff, link_marker: isLink ? (Number(def) || 0) : 0,
+        };
+      };
+      const scriptBase = "https://cdn.jsdelivr.net/gh/ProjectIgnis/CardScripts@master/";
+      const scriptReader = async (name) => {
+        const file = String(name).split("/").pop();
+        if (scriptCache.has(file)) return scriptCache.get(file);
+        const url = /^c\d+\.lua$/.test(file) ? scriptBase + "official/" + file : scriptBase + file;
+        const res = await fetch(url);
+        const txt = res.ok ? await res.text() : null;
+        scriptCache.set(file, txt);
+        return txt;
+      };
+
+      log("Creating duel…");
+      const handle = await core.createDuel({
+        flags: MODE.MODE_MR5 ?? 0n,
+        seed: [1n, 2n, 3n, 4n],
+        team1: { startingLP: 8000, startingDrawCount: 5, drawCountPerTurn: 1 },
+        team2: { startingLP: 8000, startingDrawCount: 5, drawCountPerTurn: 1 },
+        cardReader, scriptReader,
+        errorHandler: (type, text) => log("⚠ core: " + text),
+      });
+      if (!handle) throw new Error("createDuel returned null (check card data / scripts)");
+
+      const addDeck = (team, list, location) => list.forEach((c) =>
+        core.duelNewCard(handle, { team, duelist: 0, code: Number(c.id), controller: team, location, sequence: 2, position: POS.FACEDOWN_DEFENSE ?? 8 }));
+      addDeck(0, main, L.DECK ?? 1); addDeck(0, extra, L.EXTRA ?? 64);
+      addDeck(1, main, L.DECK ?? 1); addDeck(1, extra, L.EXTRA ?? 64);
+      log(`Deck loaded: ${main.length} main + ${extra.length} extra (both sides). Starting duel…`);
+
+      await core.startDuel(handle);
+      const nameOf = (t) => (names?.get ? (names.get(t) || `msg#${t}`) : `msg#${t}`);
+      const summarize = (m) => { const { type, ...rest } = m; const s = JSON.stringify(rest, (k, v) => (typeof v === "bigint" ? Number(v) : v)); return s && s !== "{}" ? " " + (s.length > 140 ? s.slice(0, 140) + "…" : s) : ""; };
+
+      let status, guard = 0;
+      const CONT = PR.CONTINUE ?? 2, END = PR.END ?? 0, WAIT = PR.WAITING ?? 1;
+      do {
+        status = await core.duelProcess(handle);
+        const msgs = core.duelGetMessage(handle) || [];
+        for (const m of msgs) log("• " + nameOf(m.type) + summarize(m));
+        guard++;
+      } while (status === CONT && guard < 4000);
+
+      if (status === END) log("— duel ended —");
+      else if (status === WAIT) log("⏸ Engine reached the first player decision. It ran the ruleset + card scripts to get here — interactive play / auto-response is Phase 3.");
+      try { const f = core.duelQueryField?.(handle); if (f) log("field snapshot: " + JSON.stringify(f).slice(0, 160) + "…"); } catch {}
+      log(`✅ processed ${guard} engine cycle(s).`);
+    } catch (e) {
+      setDuelLog((l) => [...l, "❌ " + String(e?.message || e)]);
+    }
+    setDuelBusy(false);
+  };
 
   const run = async () => {
     setRunning(true);
@@ -1908,10 +2010,30 @@ function EngineBeta({ main }) {
       </div>
       {steps.length > 0 && !running && (
         <p className="mono" style={{ fontSize: 11, color: C.mute, marginTop: 16, lineHeight: 1.6 }}>
-          Tell me which steps are green / which failed and the exact error text — that tells me whether to proceed to
-          Phase 2 (create + start a duel from your deck and run the message loop) or adjust the loader.
+          Tell me which steps are green / which failed and the exact error text.
         </p>
       )}
+
+      {/* ---- Phase 2: actually run a duel through the engine ---- */}
+      <div style={{ marginTop: 30, borderTop: `1px solid ${C.line}`, paddingTop: 20 }}>
+        <p className="disp" style={{ color: C.gold, fontSize: 14 }}>Phase 2 · Run a real duel</p>
+        <p style={{ color: C.mute, fontSize: 12.5, lineHeight: 1.6, marginTop: 6 }}>
+          Loads your current deck ({main.length} main / {extra.length} extra) into the engine on <b>both</b> sides,
+          starts a duel, and runs the real rules + Lua card scripts, streaming every engine event below. It will run
+          up to the first decision point (interactive play + auto-opponent is Phase 3). Watch for any <span style={{ color: C.bad }}>⚠ core</span> script errors.
+        </p>
+        <button onClick={runDuel} disabled={duelBusy} className="disp"
+          style={{ ...btn(), background: C.good, color: "#07120b", border: "none", padding: "11px 24px", fontSize: 13, marginTop: 12, opacity: duelBusy ? 0.6 : 1 }}>
+          {duelBusy ? "Running duel…" : "▶ Run a duel through the engine"}
+        </button>
+        {duelLog.length > 0 && (
+          <div className="mono" style={{ marginTop: 14, background: "#07090f", border: `1px solid ${C.line}`, borderRadius: 8, padding: 12, fontSize: 11, lineHeight: 1.5, maxHeight: 340, overflowY: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+            {duelLog.map((l, i) => (
+              <div key={i} style={{ color: l[0] === "❌" ? C.bad : l.startsWith("⚠") ? C.gold : l[0] === "✅" ? C.good : C.text }}>{l}</div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
