@@ -327,7 +327,7 @@ export default function App() {
           addCard={addCard} removeOne={removeOne} countOf={countOf} flash={flash} />
       )}
       {tab === "duel" && <DuelBoard main={main} extra={extra} />}
-      {tab === "auto" && <EngineBeta main={main} extra={extra} />}
+      {tab === "auto" && <EngineDuel main={main} extra={extra} />}
       {tab === "hand" && <HandTester main={main} />}
       {tab === "stats" && <Probability main={main} />}
 
@@ -2040,6 +2040,275 @@ function EngineBeta({ main, extra }) {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ---- shared engine helpers (sync build needs synchronous readers) ------ */
+const engineScriptCache = new Map();
+const syncScript = (name) => {
+  const file = String(name).split("/").pop();
+  if (engineScriptCache.has(file)) return engineScriptCache.get(file);
+  const base = "https://cdn.jsdelivr.net/gh/ProjectIgnis/CardScripts@master/";
+  const url = /^c\d+\.lua$/.test(file) ? base + "official/" + file : base + file;
+  let txt = null;
+  try { const x = new XMLHttpRequest(); x.open("GET", url, false); x.send(); if (x.status >= 200 && x.status < 300) txt = x.responseText; } catch { txt = null; }
+  engineScriptCache.set(file, txt);
+  return txt;
+};
+const makeCardReader = (db) => (code) => {
+  const r = db.exec(`SELECT id,alias,CAST(setcode AS TEXT) sc,type,atk,def,level,CAST(race AS TEXT) rc,attribute FROM datas WHERE id=${code}`);
+  const v = r?.[0]?.values?.[0];
+  if (!v) return null;
+  const [id, alias, sc, type, atk, def, level, rc, attribute] = v;
+  const t = Number(type) >>> 0, isLink = !!(t & 0x4000000), lv = Number(level) >>> 0;
+  const setBig = BigInt(sc || "0"), setcodes = [];
+  for (let i = 0n; i < 4n; i++) { const s = Number((setBig >> (16n * i)) & 0xffffn); if (s) setcodes.push(s); }
+  return { code: Number(id), alias: Number(alias) || 0, setcodes, type: t, level: lv & 0xff, attribute: Number(attribute) || 0, race: BigInt(rc || "0"), attack: Number(atk) || 0, defense: isLink ? 0 : (Number(def) || 0), lscale: (lv >> 24) & 0xff, rscale: (lv >> 16) & 0xff, link_marker: isLink ? (Number(def) || 0) : 0 };
+};
+const loadEngineMod = async () => {
+  const candidates = [ENGINE.core + "?bundle", ENGINE.core];
+  let mod = null, err = "";
+  for (const u of candidates) { try { mod = await import(/* @vite-ignore */ u); break; } catch (e) { err = String(e?.message || e); } }
+  if (!mod) throw new Error("engine import failed — " + err);
+  return mod;
+};
+
+/* ====================================================================== */
+/*  ENGINE DUEL (Phase 3) — playable, fully rules-enforced by ocgcore.     */
+/*  Effects resolve automatically; you only answer the engine's prompts.   */
+/* ====================================================================== */
+const POSLABEL = (p) => (p & 10) ? "SET" : (p & 4) ? "DEF" : "ATK"; // FACEDOWN=10, DEF=4
+function EngineDuel({ main, extra }) {
+  const [status, setStatus] = useState("idle"); // idle|loading|playing|ended|error
+  const [err, setErr] = useState("");
+  const [board, setBoard] = useState(null);
+  const [prompt, setPrompt] = useState(null);
+  const [pick, setPick] = useState([]);          // multi-select buffer for SELECT_CARD
+  const [log, setLog] = useState([]);
+  const [diag, setDiag] = useState(false);
+  const core = useRef(null), handle = useRef(null), mod = useRef(null), db = useRef(null);
+
+  const logLine = (s) => setLog((l) => [...l.slice(-160), s]);
+  const nameOf = (code) => {
+    try { const r = db.current.exec(`SELECT name FROM texts WHERE id=${code}`); return r?.[0]?.values?.[0]?.[0] || `#${code}`; } catch { return `#${code}`; }
+  };
+
+  const readBoard = () => {
+    const c = core.current, h = handle.current, m = mod.current;
+    const L = m.OcgLocation, QF = m.OcgQueryFlags;
+    const flags = QF.CODE | QF.POSITION | QF.ATTACK | QF.DEFENSE;
+    const loc = (t, location) => (c.duelQueryLocation(h, { team: t, location, flags }) || []).filter(Boolean);
+    let lp = [8000, 8000];
+    try { const f = c.duelQueryField(h); if (f?.players) lp = [f.players[0]?.lp ?? 8000, f.players[1]?.lp ?? 8000]; } catch {}
+    const side = (t) => ({ lp: lp[t], mon: loc(t, L.MZONE), st: loc(t, L.SZONE), hand: loc(t, L.HAND), grave: c.duelQueryCount(h, t, L.GRAVE), deck: c.duelQueryCount(h, t, L.DECK), extra: c.duelQueryCount(h, t, L.EXTRA) });
+    setBoard({ me: side(0), opp: side(1) });
+  };
+
+  const isSelect = (m, MT) => [MT.SELECT_BATTLECMD, MT.SELECT_IDLECMD, MT.SELECT_EFFECTYN, MT.SELECT_YESNO, MT.SELECT_OPTION, MT.SELECT_CARD, MT.SELECT_CHAIN, MT.SELECT_PLACE, MT.SELECT_POSITION, MT.SELECT_TRIBUTE, MT.SELECT_SUM, MT.SELECT_UNSELECT_CARD].includes(m.type);
+
+  // auto-response for the opponent (P1) — pass / decline so it's single-player
+  const autoResponse = (m, RT, IA, BA, MT) => {
+    switch (m.type) {
+      case MT.SELECT_IDLECMD: return { type: RT.SELECT_IDLECMD, action: IA.TO_EP, index: null };
+      case MT.SELECT_BATTLECMD: return { type: RT.SELECT_BATTLECMD, action: BA.TO_EP, index: null };
+      case MT.SELECT_CHAIN: return { type: RT.SELECT_CHAIN, index: null };
+      case MT.SELECT_EFFECTYN: return { type: RT.SELECT_EFFECTYN, yes: false };
+      case MT.SELECT_YESNO: return { type: RT.SELECT_YESNO, yes: false };
+      case MT.SELECT_OPTION: return { type: RT.SELECT_OPTION, index: 0 };
+      case MT.SELECT_CARD: return { type: RT.SELECT_CARD, indicies: Array.from({ length: m.min }, (_, i) => i) };
+      case MT.SELECT_POSITION: return { type: RT.SELECT_POSITION, position: firstPos(m.positions) };
+      case MT.SELECT_PLACE: return { type: RT.SELECT_PLACE, places: firstPlaces(m, 1) };
+      default: return { type: RT.SELECT_YESNO, yes: false };
+    }
+  };
+  const firstPos = (mask) => [1, 4, 2, 8].find((p) => mask & p) || 1;
+  const firstPlaces = (m, n) => {
+    const L = mod.current.OcgLocation, out = [];
+    for (let seq = 0; seq < 7 && out.length < (n || m.count); seq++) if (!(m.field_mask & (1 << seq))) out.push({ player: m.player, location: L.MZONE, sequence: seq });
+    for (let seq = 0; seq < 5 && out.length < (n || m.count); seq++) if (!(m.field_mask & (1 << (8 + seq)))) out.push({ player: m.player, location: L.SZONE, sequence: seq });
+    return out.length ? out : [{ player: m.player, location: L.MZONE, sequence: 0 }];
+  };
+
+  const drive = () => {
+    const c = core.current, h = handle.current, m = mod.current;
+    const MT = m.OcgMessageType, PR = m.OcgProcessResult, RT = m.OcgResponseType, IA = m.SelectIdleCMDAction, BA = m.SelectBattleCMDAction;
+    let guard = 0;
+    while (guard++ < 6000) {
+      const st = c.duelProcess(h);
+      const msgs = c.duelGetMessage(h) || [];
+      for (const msg of msgs) {
+        if (msg.type === MT.HINT) continue;
+        const nm = (m.ocgMessageTypeStrings?.get?.(msg.type)) || `msg#${msg.type}`;
+        if ([MT.DRAW, MT.SUMMONING, MT.SPSUMMONING, MT.MOVE, MT.CHAINING, MT.SET, MT.FLIPSUMMONING, MT.ATTACK, MT.DAMAGE, MT.RECOVER, MT.NEW_TURN, MT.NEW_PHASE].includes(msg.type))
+          logLine("• " + nm.toLowerCase().replace(/_/g, " "));
+      }
+      readBoard();
+      if (st === PR.END) { setStatus("ended"); setPrompt(null); return; }
+      if (st === PR.WAITING) {
+        const sel = [...msgs].reverse().find((x) => isSelect(x, MT));
+        if (!sel) return;
+        if (sel.player !== 0) { c.duelSetResponse(h, autoResponse(sel, RT, IA, BA, MT)); continue; }
+        setPick([]); setPrompt(sel); return; // hand off to the human
+      }
+      // CONTINUE → keep processing
+    }
+  };
+
+  const respond = (resp) => {
+    try { core.current.duelSetResponse(handle.current, resp); setPrompt(null); setPick([]); drive(); }
+    catch (e) { setErr(String(e?.message || e)); setStatus("error"); }
+  };
+
+  const start = async () => {
+    setStatus("loading"); setErr(""); setLog([]); setPrompt(null); setBoard(null);
+    try {
+      if (!main.length) throw new Error("Build a deck first (Deck Editor tab).");
+      // sql.js + cdb
+      await loadScript(ENGINE.sqljsScript);
+      const SQL = await window.initSqlJs({ locateFile: () => ENGINE.sqlWasm });
+      db.current = new SQL.Database(new Uint8Array(await (await fetch(ENGINE.cdb)).arrayBuffer()));
+      // engine
+      const m = await loadEngineMod(); mod.current = m;
+      const c = await m.default({ sync: true }); core.current = c;
+      const L = m.OcgLocation, MODE = m.OcgDuelMode, POS = m.OcgPosition;
+      const h = c.createDuel({
+        flags: MODE?.MODE_MR5 ?? 0n, seed: [1n, 2n, 3n, 4n],
+        team1: { startingLP: 8000, startingDrawCount: 5, drawCountPerTurn: 1 },
+        team2: { startingLP: 8000, startingDrawCount: 5, drawCountPerTurn: 1 },
+        cardReader: makeCardReader(db.current), scriptReader: syncScript,
+        errorHandler: (t, text) => logLine("⚠ " + text),
+      });
+      if (!h) throw new Error("createDuel returned null");
+      handle.current = h;
+      const add = (team, list, location) => list.forEach((cd) => c.duelNewCard(h, { team, duelist: 0, code: Number(cd.id), controller: team, location, sequence: 2, position: POS?.FACEDOWN_DEFENSE ?? 8 }));
+      add(0, main, L.DECK); add(0, extra, L.EXTRA); add(1, main, L.DECK); add(1, extra, L.EXTRA);
+      c.startDuel(h);
+      setStatus("playing");
+      logLine("duel started — you are Player 1");
+      drive();
+    } catch (e) { setErr(String(e?.message || e)); setStatus("error"); }
+  };
+
+  // ---- prompt → buttons ------------------------------------------------
+  const promptButtons = () => {
+    const m = mod.current, p = prompt;
+    const RT = m.OcgResponseType, IA = m.SelectIdleCMDAction, BA = m.SelectBattleCMDAction, MT = m.OcgMessageType;
+    const B = [];
+    const push = (label, resp, tone) => B.push({ label, resp, tone });
+    if (p.type === MT.SELECT_IDLECMD) {
+      p.summons?.forEach((c, i) => push(`Summon ${nameOf(c.code)}`, { type: RT.SELECT_IDLECMD, action: IA.SELECT_SUMMON, index: i }, "good"));
+      p.special_summons?.forEach((c, i) => push(`Special Summon ${nameOf(c.code)}`, { type: RT.SELECT_IDLECMD, action: IA.SELECT_SPECIAL_SUMMON, index: i }, "good"));
+      p.monster_sets?.forEach((c, i) => push(`Set (monster) ${nameOf(c.code)}`, { type: RT.SELECT_IDLECMD, action: IA.SELECT_MONSTER_SET, index: i }));
+      p.spell_sets?.forEach((c, i) => push(`Set ${nameOf(c.code)}`, { type: RT.SELECT_IDLECMD, action: IA.SELECT_SPELL_SET, index: i }));
+      p.activates?.forEach((c, i) => push(`Activate ${nameOf(c.code)}`, { type: RT.SELECT_IDLECMD, action: IA.SELECT_ACTIVATE, index: i }, "gold"));
+      p.pos_changes?.forEach((c, i) => push(`Change position: ${nameOf(c.code)}`, { type: RT.SELECT_IDLECMD, action: IA.SELECT_POS_CHANGE, index: i }));
+      if (p.to_bp) push("Go to Battle Phase ⚔", { type: RT.SELECT_IDLECMD, action: IA.TO_BP, index: null }, "gold");
+      if (p.to_ep) push("End Turn", { type: RT.SELECT_IDLECMD, action: IA.TO_EP, index: null }, "bad");
+    } else if (p.type === MT.SELECT_BATTLECMD) {
+      p.attacks?.forEach((c, i) => push(`Attack with ${nameOf(c.code)}${c.can_direct ? " (direct OK)" : ""}`, { type: RT.SELECT_BATTLECMD, action: BA.SELECT_BATTLE, index: i }, "good"));
+      p.chains?.forEach((c, i) => push(`Activate ${nameOf(c.code)}`, { type: RT.SELECT_BATTLECMD, action: BA.SELECT_CHAIN, index: i }, "gold"));
+      if (p.to_m2) push("Go to Main Phase 2", { type: RT.SELECT_BATTLECMD, action: BA.TO_M2, index: null });
+      if (p.to_ep) push("End Turn", { type: RT.SELECT_BATTLECMD, action: BA.TO_EP, index: null }, "bad");
+    } else if (p.type === MT.SELECT_CHAIN) {
+      p.selects?.forEach((c, i) => push(`Chain ${nameOf(c.code)}`, { type: RT.SELECT_CHAIN, index: i }, "gold"));
+      if (!p.forced) push("No response", { type: RT.SELECT_CHAIN, index: null }, "bad");
+    } else if (p.type === MT.SELECT_EFFECTYN || p.type === MT.SELECT_YESNO) {
+      const rt = p.type === MT.SELECT_EFFECTYN ? RT.SELECT_EFFECTYN : RT.SELECT_YESNO;
+      push("Yes", { type: rt, yes: true }, "good"); push("No", { type: rt, yes: false }, "bad");
+    } else if (p.type === MT.SELECT_OPTION) {
+      p.options?.forEach((o, i) => push(`Option ${i + 1}`, { type: RT.SELECT_OPTION, index: i }));
+    } else if (p.type === MT.SELECT_POSITION) {
+      [[1, "Face-up ATK"], [4, "Face-up DEF"], [8, "Face-down DEF"], [2, "Face-down ATK"]].forEach(([bit, lab]) => (p.positions & bit) && push(lab, { type: RT.SELECT_POSITION, position: bit }));
+    } else if (p.type === MT.SELECT_PLACE) {
+      push("Auto-place", { type: RT.SELECT_PLACE, places: firstPlaces(p) }, "good");
+    }
+    return B;
+  };
+
+  if (!main.length) return <Center>Build a deck first — the Deck Editor tab.</Center>;
+
+  if (status === "idle" || status === "loading" || status === "error") return (
+    <div style={{ height: "calc(100vh - 60px)", display: "grid", placeItems: "center", padding: 24 }}>
+      <div style={{ textAlign: "center", maxWidth: 520 }}>
+        <p className="disp" style={{ color: C.gold, fontSize: 18 }}>Auto-Duel · Full Engine (ocgcore)</p>
+        <p style={{ color: C.mute, fontSize: 13, lineHeight: 1.6, margin: "10px 0 18px" }}>
+          Plays under the real, current Master Rules with the EDOPro engine — card effects resolve
+          automatically, draws and summons are enforced, no manual moves. You only answer the engine's
+          prompts. Loads your deck ({main.length} main / {extra.length} extra) on both sides; the
+          opponent auto-passes for now (a full AI is next). First load fetches the engine + card database.
+        </p>
+        {status === "error" && <p className="mono" style={{ color: C.bad, fontSize: 12, marginBottom: 14, wordBreak: "break-word" }}>❌ {err}</p>}
+        <button onClick={start} disabled={status === "loading"} className="disp" style={{ ...btn(), background: C.gold, color: "#1a1206", border: "none", padding: "12px 30px", fontSize: 14, opacity: status === "loading" ? 0.6 : 1 }}>
+          {status === "loading" ? "Loading engine…" : "Start Auto-Duel"}
+        </button>
+        <div style={{ marginTop: 16 }}>
+          <button onClick={() => setDiag((d) => !d)} style={{ ...miniBar(), fontSize: 10 }}>{diag ? "hide" : "show"} engine diagnostics</button>
+        </div>
+        {diag && <div style={{ marginTop: 12 }}><EngineBeta main={main} extra={extra} /></div>}
+        {log.length > 0 && <div className="mono" style={{ marginTop: 14, textAlign: "left", fontSize: 11, color: C.mute, maxHeight: 160, overflowY: "auto" }}>{log.map((l, i) => <div key={i}>{l}</div>)}</div>}
+      </div>
+    </div>
+  );
+
+  const Zone = ({ card, faceDown }) => (
+    <div style={{ width: 50, height: 73, borderRadius: 5, border: `1px solid ${C.line}`, background: C.panel2, overflow: "hidden", position: "relative", flexShrink: 0 }}>
+      {card ? (faceDown || (card.position & 10)
+        ? <div style={{ width: "100%", height: "100%", background: `repeating-linear-gradient(45deg,${shade(C.gold, -30)} 0 4px,#14100a 4px 8px)` }} />
+        : <><CardImg id={card.code} variant="small" name={nameOf(card.code)} style={{ width: "100%", height: "100%", objectFit: "cover", transform: (card.position & 4) ? "rotate(90deg) scale(.8)" : "none" }} />
+          {card.attack != null && <span className="mono" style={{ position: "absolute", bottom: 0, left: 0, right: 0, fontSize: 7.5, textAlign: "center", background: "rgba(0,0,0,.6)", color: "#fff" }}>{card.attack}/{card.defense ?? "—"}</span>}</>)
+        : <span className="mono" style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 8, color: C.mute }} />}
+    </div>
+  );
+  const zonesRow = (arr, n) => Array.from({ length: n }, (_, i) => <Zone key={i} card={arr[i]} />);
+  const b = board;
+  const btns = prompt ? promptButtons() : [];
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", height: "calc(100vh - 60px)" }}>
+      <div style={{ overflow: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 10, background: `linear-gradient(180deg,#0e1424,#0a0f1b)` }}>
+        {b && [["opp", "Player 2 (opponent)", C.bad], ["me", "Player 1 (you)", C.good]].map(([k, label, col]) => {
+          const s = b[k];
+          return (
+            <div key={k} style={{ border: `1px solid ${C.line}`, borderRadius: 10, padding: 10, background: "rgba(0,0,0,.25)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+                <span className="disp" style={{ fontSize: 12, color: col }}>{label}</span>
+                <span className="mono lpnum" key={s.lp} style={{ fontSize: 18, fontWeight: 700, color: s.lp > 4000 ? C.good : s.lp > 1500 ? C.gold : C.bad }}>LP {s.lp}</span>
+                <span className="mono" style={{ fontSize: 10, color: C.mute, marginLeft: "auto" }}>hand {s.hand.length} · deck {s.deck} · GY {s.grave} · extra {s.extra}</span>
+              </div>
+              <div style={{ display: "flex", gap: 5, marginBottom: 5 }}>{zonesRow(s.mon, 5)}</div>
+              <div style={{ display: "flex", gap: 5 }}>{zonesRow(s.st, 5)}</div>
+              {k === "me" && (
+                <div style={{ display: "flex", gap: 4, marginTop: 8, flexWrap: "wrap" }}>
+                  {s.hand.map((c, i) => <Zone key={i} card={c} />)}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* right: prompt + log */}
+      <div style={{ borderLeft: `1px solid ${C.line}`, display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div style={{ padding: 12, borderBottom: `1px solid ${C.line}`, minHeight: 180 }}>
+          <div className="disp" style={{ fontSize: 11, color: C.gold, marginBottom: 8 }}>
+            {status === "ended" ? "Duel over" : prompt ? "Your decision" : "Engine resolving…"}
+          </div>
+          {status === "ended" && <button onClick={start} className="disp" style={{ ...btn(), background: C.gold, color: "#1a1206", border: "none" }}>New duel</button>}
+          {prompt && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {btns.length === 0 && <p className="mono" style={{ fontSize: 11, color: C.mute }}>(no options — the engine may be mid-resolution)</p>}
+              {btns.map((x, i) => (
+                <button key={i} onClick={() => respond(x.resp)} style={{ textAlign: "left", background: C.panel2, border: `1px solid ${x.tone === "good" ? C.good : x.tone === "bad" ? C.bad : x.tone === "gold" ? C.gold : C.line}`, color: x.tone === "good" ? C.good : x.tone === "bad" ? C.bad : x.tone === "gold" ? C.gold : C.text, borderRadius: 6, padding: "8px 10px", fontSize: 12 }}>{x.label}</button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div style={{ padding: "8px 12px", flex: 1, overflowY: "auto", minHeight: 0 }}>
+          <div className="disp" style={{ fontSize: 10, color: C.mute, marginBottom: 6 }}>Engine Log</div>
+          {[...log].reverse().map((l, i) => <div key={i} className="mono" style={{ fontSize: 10.5, color: l[0] === "⚠" ? C.bad : C.text, opacity: 0.9, padding: "1px 0" }}>{l}</div>)}
+        </div>
       </div>
     </div>
   );
