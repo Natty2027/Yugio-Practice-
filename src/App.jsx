@@ -1791,7 +1791,9 @@ function PileViewer({ game, viewer, setViewer, setSel, sel, actionsFor, plabel }
 /*  so it can never break the manual app. Full duel loop is a later phase. */
 /* ====================================================================== */
 const ENGINE = {
-  core: "https://esm.sh/jsr/@n1xx1/ocgcore-wasm@0.1.3",
+  // the package root (mod.ts) uses `export *`, which drops the default export;
+  // createCore is the DEFAULT export of dist/index.js, so import that directly.
+  core: "https://esm.sh/@jsr/n1xx1__ocgcore-wasm@0.1.3/dist/index.js",
   sqljsScript: "https://cdn.jsdelivr.net/npm/sql.js@1.11.0/dist/sql-wasm.js", // browser UMD build (sets window.initSqlJs)
   sqlWasm: "https://cdn.jsdelivr.net/npm/sql.js@1.11.0/dist/sql-wasm.wasm",
   cdb: "https://cdn.jsdelivr.net/gh/ProjectIgnis/BabelCDB@master/cards.cdb",
@@ -1856,14 +1858,14 @@ function EngineBeta({ main }) {
       // 5. engine wasm — use the SYNC build (browser-safe; the default async
       //    build needs experimental JSPI stack-switching). Try bundle first.
       set(4, { state: "run" });
-      const candidates = [ENGINE.core + "?bundle", ENGINE.core];
+      const candidates = [ENGINE.core, ENGINE.core + "?bundle"];
       let coreMod = null, usedUrl = "", lastErr = "";
       for (const url of candidates) {
         try { coreMod = await import(/* @vite-ignore */ url); usedUrl = url; break; }
         catch (e) { lastErr = String(e?.message || e); }
       }
       if (!coreMod) throw new Error("engine import failed — " + lastErr);
-      const createCore = coreMod.createCore || coreMod.default?.createCore || coreMod.default;
+      const createCore = coreMod.default || coreMod.createCore;
       if (typeof createCore !== "function") throw new Error("createCore not exported. keys: " + Object.keys(coreMod).slice(0, 14).join(","));
       const core = await createCore({ sync: true });
       window.__ocg = core;
