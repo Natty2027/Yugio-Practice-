@@ -327,6 +327,7 @@ function Editor({ main, extra, side, setMain, setExtra, setSide, addCard, remove
   const [loading, setLoading] = useState(false);
   const [dest, setDest] = useState("auto");     // auto | side
   const [mdOnly, setMdOnly] = useState(true);    // restrict pool to the Master Duel card set
+  const [set, setSet] = useState("");            // browse a specific printed set (e.g. Chaos Origins)
   const [preview, setPreview] = useState(null);
   const [savedNames, setSavedNames] = useState([]);
   const debounce = useRef(null);
@@ -335,29 +336,30 @@ function Editor({ main, extra, side, setMain, setExtra, setSide, addCard, remove
   useEffect(() => { (async () => setSavedNames((await store.get("deck_index")) || []))(); }, []);
 
   const runSearch = useCallback(async () => {
-    if (!q && !cat && !attr && !level) { setResults([]); return; }
+    if (!q && !cat && !attr && !level && !set) { setResults([]); return; }
     setLoading(true);
     const p = new URLSearchParams();
     if (q) p.set("fname", q);
     if (cat) p.set("type", cat);
     if (attr) p.set("attribute", attr);
     if (level) p.set("level", level);
-    if (mdOnly) p.set("format", "master duel");   // open Master Duel legal pool
+    if (set) p.set("cardset", set);               // browse a specific printed set
+    else if (mdOnly) p.set("format", "master duel"); // otherwise the Master Duel legal pool
     p.set("misc", "yes");                          // pulls md_rarity / formats
-    p.set("num", "80"); p.set("offset", "0");
+    p.set("num", set ? "120" : "80"); p.set("offset", "0");
     try {
       const r = await fetch(`${API}?${p.toString()}`);
       const j = await r.json();
       setResults((j.data || []).map(normalize));
     } catch { setResults([]); flash("Search unavailable offline"); }
     setLoading(false);
-  }, [q, cat, attr, level, mdOnly]);
+  }, [q, cat, attr, level, mdOnly, set]);
 
   useEffect(() => {
     clearTimeout(debounce.current);
     debounce.current = setTimeout(runSearch, 320);
     return () => clearTimeout(debounce.current);
-  }, [q, cat, attr, level, mdOnly, runSearch]);
+  }, [q, cat, attr, level, mdOnly, set, runSearch]);
 
   const total = main.length;
   const mainGroups = useMemo(() => groupBy(main), [main]);
@@ -459,6 +461,17 @@ function Editor({ main, extra, side, setMain, setExtra, setSide, addCard, remove
               MD only
             </button>
           </div>
+          {/* browse a specific printed set */}
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input value={set} onChange={(e) => setSet(e.target.value)} placeholder="Browse a set (e.g. Chaos Origins)…" style={inp(1, "120px")} />
+            {SET_CHIPS.map((s) => (
+              <button key={s} onClick={() => setSet(set === s ? "" : s)} className="disp"
+                style={{ fontSize: 10, padding: "6px 9px", borderRadius: 6, border: `1px solid ${set === s ? MD.accent : MD.line}`, background: set === s ? "rgba(109,141,255,.18)" : "transparent", color: set === s ? MD.accent : C.mute, whiteSpace: "nowrap" }}>
+                {s}
+              </button>
+            ))}
+            {set && <button onClick={() => setSet("")} style={{ ...mdBtn(), padding: "4px 8px", fontSize: 10, color: C.bad, borderColor: C.bad }}>clear set</button>}
+          </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <select value={cat} onChange={(e) => setCat(e.target.value)} style={inp()}>
               {CATS.map(([v, l]) => <option key={l} value={v}>{l}</option>)}
@@ -500,6 +513,8 @@ function Editor({ main, extra, side, setMain, setExtra, setSide, addCard, remove
 
 /* Master Duel deck-editor palette (deep navy / violet) */
 const MD = { bg: "#0b0e1a", panel: "#141a30", panel2: "#1c2440", line: "#2c3556", gold: "#e8c25a", accent: "#6d8dff" };
+/* quick-pick set names for the pool browser */
+const SET_CHIPS = ["Chaos Origins", "Battle of Chaos"];
 const mdBtn = () => ({ background: MD.panel2, border: `1px solid ${MD.line}`, color: C.text, borderRadius: 6, padding: "7px 11px", fontSize: 12 });
 
 /* left-hand inspector — big art, stats, effect text, MD rarity */
