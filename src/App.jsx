@@ -191,7 +191,16 @@ export default function App() {
         .cardimg{transition:transform .12s ease, box-shadow .12s ease}
         .cardimg:hover{transform:translateY(-3px);box-shadow:0 6px 18px rgba(0,0,0,.55)}
         input,select{font-family:inherit}
-        @media (prefers-reduced-motion:reduce){.cardimg{transition:none}}
+        .dcard{animation:popIn .28s cubic-bezier(.2,.9,.3,1.25)}
+        .dcard:hover{filter:brightness(1.12)}
+        .lpnum{display:inline-block;animation:lpPulse .45s ease}
+        .turnbanner{animation:bannerIn .5s ease}
+        @keyframes popIn{from{transform:scale(.55) translateY(6px);opacity:0}to{transform:scale(1) translateY(0);opacity:1}}
+        @keyframes lpPulse{0%{transform:scale(1)}35%{transform:scale(1.28)}100%{transform:scale(1)}}
+        @keyframes bannerIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes attackPulse{0%,100%{box-shadow:0 0 0 0 rgba(224,87,106,.7)}50%{box-shadow:0 0 0 5px rgba(224,87,106,0)}}
+        .atktarget{animation:attackPulse 1.1s infinite}
+        @media (prefers-reduced-motion:reduce){.cardimg,.dcard,.lpnum,.turnbanner,.atktarget{animation:none;transition:none}}
       `}</style>
 
       {/* header */}
@@ -823,6 +832,8 @@ function DuelBoard({ main, extra }) {
   const [game, setGame] = useState(null);
   const [sel, setSel] = useState(null);
   const [pending, setPending] = useState(null);
+  const [attackFrom, setAttackFrom] = useState(null); // {p,loc,idx} of attacking monster
+  const [hover, setHover] = useState(null);            // instance under the cursor
   const [viewer, setViewer] = useState(null);
   const [hideHands, setHideHands] = useState(false);
   const [dmg, setDmg] = useState(1000);
@@ -832,7 +843,7 @@ function DuelBoard({ main, extra }) {
     UID = 0;
     const g = { turn: 1, active: 0, phase: "M1", log: [{ t: 1, m: "Duel start — you go first" }], emz: [null, null], players: [buildSide(main, extra), buildSide(main, extra)] };
     g.players.forEach((pl) => { for (let i = 0; i < 5; i++) pl.hand.push(pl.deck.shift()); });
-    hist.current = []; setGame(g); setSel(null); setPending(null); setViewer(null);
+    hist.current = []; setGame(g); setSel(null); setPending(null); setAttackFrom(null); setViewer(null);
   };
   const commit = (mut, msg) => {
     setGame((g) => {
@@ -842,9 +853,9 @@ function DuelBoard({ main, extra }) {
       if (msg) n.log = [...n.log, { t: n.turn, m: msg }];
       return n;
     });
-    setSel(null); setPending(null);
+    setSel(null); setPending(null); setAttackFrom(null);
   };
-  const undo = () => { const p = hist.current.pop(); if (p) { setGame(p); setSel(null); setPending(null); } };
+  const undo = () => { const p = hist.current.pop(); if (p) { setGame(p); setSel(null); setPending(null); setAttackFrom(null); } };
 
   if (!main.length) return <Center>Build a deck first — the Deck Editor tab.</Center>;
   if (!game) return (
@@ -891,7 +902,51 @@ function DuelBoard({ main, extra }) {
       if (pending.normal && pending.kind === "mon") n.players[pending.src.p].normalSummoned = true;
     }, `${plabel(pending.src.p)} ${verb} ${name}`);
   };
+  /* -------- battle: attacker → target with auto damage calc -------- */
+  const beginAttack = (s) => { setAttackFrom(s); setSel(null); setPending(null); };
+  const atkTarget = (p, kind, idx) => {
+    if (!attackFrom) return false;
+    return p === 1 - attackFrom.p && (kind === "m" || kind === "emz") && !!zoneInst(p, kind, idx);
+  };
+  const oppMonsters = (opp) =>
+    P[opp].mzones.some(Boolean) || game.emz.some((e) => e && e.owner === opp);
+
+  const resolveAttack = (tSel) => {
+    const aInst = getInst(attackFrom), tInst = getInst(tSel);
+    if (!aInst || !tInst) { setAttackFrom(null); return; }
+    const aP = attackFrom.p, tP = tSel.p, aAtk = aInst.card.atk ?? 0;
+    const aName = aInst.card.name, tName = tInst.card.name;
+    const bury = (n, s) => { const x = pull(n, s); if (x) { x.pos = "atk"; n.players[s.p].gy.push(x); } };
+    /* resolve up front so we can log the outcome and mutate deterministically */
+    let killA = false, killT = false, dmgTo = null, dmgAmt = 0, msg;
+    if (tInst.pos === "atk") {
+      const tAtk = tInst.card.atk ?? 0;
+      if (aAtk > tAtk) { killT = true; dmgTo = tP; dmgAmt = aAtk - tAtk; msg = `⚔ ${aName} destroys ${tName} — ${plabel(tP)} takes ${dmgAmt}`; }
+      else if (aAtk < tAtk) { killA = true; dmgTo = aP; dmgAmt = tAtk - aAtk; msg = `⚔ ${tName} survives — ${plabel(aP)} takes ${dmgAmt}`; }
+      else { killA = killT = true; msg = `⚔ ${aName} and ${tName} destroy each other`; }
+    } else { /* target set / defense — reveal and compare against DEF */
+      const tDef = tInst.card.def ?? 0;
+      if (aAtk > tDef) { killT = true; msg = `⚔ ${aName} destroys defending ${tName} (${aAtk} vs DEF ${tDef})`; }
+      else if (aAtk < tDef) { dmgTo = aP; dmgAmt = tDef - aAtk; msg = `⚔ ${tName} holds (DEF ${tDef}) — ${plabel(aP)} takes ${dmgAmt}`; }
+      else { msg = `⚔ ${aName} bounces off ${tName} (${aAtk} = DEF ${tDef})`; }
+    }
+    commit((n) => {
+      if (dmgTo != null) n.players[dmgTo].lp = Math.max(0, n.players[dmgTo].lp - dmgAmt);
+      if (killT) bury(n, tSel);
+      if (killA) bury(n, attackFrom);
+    }, msg);
+    setAttackFrom(null);
+  };
+  const directAttack = () => {
+    const aInst = getInst(attackFrom); if (!aInst) { setAttackFrom(null); return; }
+    const aP = attackFrom.p, oppP = 1 - aP, dealt = aInst.card.atk ?? 0;
+    commit((n) => { n.players[oppP].lp = Math.max(0, n.players[oppP].lp - dealt); },
+      `⚔ ${aInst.card.name} attacks directly — ${plabel(oppP)} takes ${dealt}`);
+    setAttackFrom(null);
+  };
+
   const onZone = (p, kind, idx) => {
+    if (attackFrom) { if (atkTarget(p, kind, idx)) resolveAttack({ p, loc: kind, idx }); return; }
     if (pending) { if (canPlace(p, kind, idx)) finishPlace(p, kind, idx); return; }
     const inst = zoneInst(p, kind, idx);
     if (inst) setSel({ p, loc: kind, idx });
@@ -926,7 +981,7 @@ function DuelBoard({ main, extra }) {
       if (inst.pos !== "atk") A.push({ l: "To ATK (face-up)", go: () => setPos(s, "atk", `${P1}: ${name} → ATK`) });
       if (inst.pos !== "def") A.push({ l: "To DEF (face-up)", go: () => setPos(s, "def", `${P1}: ${name} → DEF`) });
       if (inst.pos !== "set") A.push({ l: "Set (face-down DEF)", go: () => setPos(s, "set", `${P1} set a monster`) });
-      A.push({ l: "⚔ Declare attack", go: () => commit(() => {}, `${P1}'s ${name} declares an attack`) });
+      if (inst.pos === "atk") A.push({ l: "⚔ Declare attack", go: () => beginAttack(s) });
       A.push({ l: "Send to GY", go: () => move(s, "gy", "atk", `${P1} sent ${name} to GY`) });
       A.push({ l: "Banish", go: () => move(s, "banish", "atk", `${P1} banished ${name}`) });
       A.push({ l: "Return to Hand", go: () => move(s, "hand", "atk", `${name} returned to hand`) });
@@ -959,18 +1014,20 @@ function DuelBoard({ main, extra }) {
   const dice = () => commit(() => {}, `🎲 Dice: ${1 + Math.floor(Math.random() * 6)}`);
 
   const selInst = getInst(sel);
+  const previewInst = hover || selInst;
+  const attackerInst = getInst(attackFrom);
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 260px", height: "calc(100vh - 60px)" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 272px", height: "calc(100vh - 60px)" }}>
       {/* ---- board ---- */}
       <div style={{ overflow: "auto", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
         {/* HUD */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: C.panel, borderRadius: 8, padding: "7px 10px", position: "sticky", top: 0, zIndex: 5 }}>
-          <span className="disp" style={{ fontSize: 12, color: C.gold }}>Turn {game.turn}</span>
-          <span className="mono" style={{ fontSize: 11, color: you ? C.good : C.bad }}>{you ? "P1 (you)" : "P2 (opp)"}</span>
+          <span key={game.turn} className="disp turnbanner" style={{ fontSize: 12, color: C.gold }}>Turn {game.turn}</span>
+          <span className="mono" style={{ fontSize: 11, color: you ? C.good : C.bad, border: `1px solid ${you ? C.good : C.bad}`, borderRadius: 20, padding: "2px 9px" }}>{you ? "P1 to move" : "P2 to move"}</span>
           <div style={{ display: "flex", gap: 2 }}>
             {PHASES.map((ph) => (
-              <button key={ph} onClick={() => setPhase(ph)} className="mono"
+              <button key={ph} onClick={() => setPhase(ph)} title={PHASE_FULL[ph]} className="mono"
                 style={{ fontSize: 10, padding: "4px 7px", borderRadius: 4, border: "none", background: game.phase === ph ? C.gold : C.panel2, color: game.phase === ph ? "#1a1206" : C.mute }}>{ph}</button>
             ))}
           </div>
@@ -978,7 +1035,7 @@ function DuelBoard({ main, extra }) {
           <button onClick={undo} style={miniBar()}>↩ Undo</button>
           <button onClick={coin} style={miniBar()}>🪙</button>
           <button onClick={dice} style={miniBar()}>🎲</button>
-          <button onClick={() => setHideHands((h) => !h)} style={miniBar()}>{hideHands ? "Show hands" : "Hide opp"}</button>
+          <button onClick={() => setHideHands((h) => !h)} style={miniBar()}>{hideHands ? "Show P2 hand" : "Hide P2 hand"}</button>
           <button onClick={start} style={{ ...miniBar(), color: C.bad }}>Reset</button>
         </div>
 
@@ -988,38 +1045,61 @@ function DuelBoard({ main, extra }) {
             <button onClick={() => { setPending(null); setSel(null); }} style={{ background: "none", border: "none", color: C.good, textDecoration: "underline" }}>cancel</button>
           </div>
         )}
+        {attackFrom && (
+          <div className="mono" style={{ background: "rgba(224,87,106,.12)", border: `1px solid ${C.bad}`, color: C.bad, borderRadius: 6, padding: "6px 10px", fontSize: 11.5, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span>⚔ {attackerInst?.card.name} ({attackerInst?.card.atk ?? 0} ATK) is attacking — click a pulsing target{!oppMonsters(1 - attackFrom.p) ? "" : ""}.</span>
+            <button onClick={directAttack} style={{ ...miniBar(), color: C.bad, borderColor: C.bad }}>Direct attack (−{attackerInst?.card.atk ?? 0})</button>
+            <button onClick={() => setAttackFrom(null)} style={{ background: "none", border: "none", color: C.bad, textDecoration: "underline", marginLeft: "auto" }}>cancel</button>
+          </div>
+        )}
 
-        <PlayerField p={1} P={P} game={game} onZone={onZone} canPlace={canPlace} sel={sel} setSel={setSel} setViewer={setViewer} drawCard={drawCard} shuffleDeck={shuffleDeck} changeLP={changeLP} dmg={dmg} hideHand={hideHands} top />
-        <EMZRow game={game} onZone={onZone} canPlace={canPlace} sel={sel} />
-        <PlayerField p={0} P={P} game={game} onZone={onZone} canPlace={canPlace} sel={sel} setSel={setSel} setViewer={setViewer} drawCard={drawCard} shuffleDeck={shuffleDeck} changeLP={changeLP} dmg={dmg} hideHand={false} />
+        {/* the duel mat — field in the middle, each player's half facing them */}
+        <div style={{ flex: 1, borderRadius: 14, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6,
+          background: "radial-gradient(120% 80% at 50% 50%, #123024 0%, #0c1f18 55%, #08130e 100%)",
+          border: `1px solid ${shade(C.good, -70)}`, boxShadow: "inset 0 0 60px rgba(0,0,0,.55)" }}>
+          {/* opponent (P2) — rotated 180° so the whole half faces them across the table */}
+          <div style={{ transform: "rotate(180deg)" }}>
+            <PlayerField p={1} P={P} game={game} onZone={onZone} canPlace={canPlace} atkTarget={atkTarget} attackFrom={attackFrom} sel={sel} setSel={setSel} setViewer={setViewer} setHover={setHover} drawCard={drawCard} shuffleDeck={shuffleDeck} changeLP={changeLP} dmg={dmg} hideHand={hideHands} />
+          </div>
+          <EMZRow game={game} onZone={onZone} canPlace={canPlace} atkTarget={atkTarget} sel={sel} setHover={setHover} />
+          {/* you (P1) — facing up toward the player */}
+          <PlayerField p={0} P={P} game={game} onZone={onZone} canPlace={canPlace} atkTarget={atkTarget} attackFrom={attackFrom} sel={sel} setSel={setSel} setViewer={setViewer} setHover={setHover} drawCard={drawCard} shuffleDeck={shuffleDeck} changeLP={changeLP} dmg={dmg} hideHand={false} />
+        </div>
       </div>
 
-      {/* ---- side panel: selected card actions + log ---- */}
+      {/* ---- side panel: live preview + selected card actions + log ---- */}
       <div style={{ borderLeft: `1px solid ${C.line}`, display: "flex", flexDirection: "column", minHeight: 0 }}>
-        <div style={{ padding: 12, borderBottom: `1px solid ${C.line}`, minHeight: 210 }}>
-          {selInst ? (
-            <div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <img src={IMG(selInst.card.id, true)} alt="" width="46" style={{ borderRadius: 3, objectFit: "cover", flexShrink: 0 }} onError={(e) => (e.target.style.visibility = "hidden")} />
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, lineHeight: 1.2 }}>{selInst.card.name}</div>
-                  <div className="mono" style={{ fontSize: 10, color: C.mute, marginTop: 3 }}>{plabel(sel.p)} · {sel.loc.toUpperCase()}{selInst.card.atk != null ? ` · ${selInst.card.atk}/${selInst.card.def ?? "—"}` : ""}</div>
+        <div style={{ padding: 12, borderBottom: `1px solid ${C.line}` }}>
+          {previewInst ? (
+            <div style={{ display: "flex", gap: 10 }}>
+              <img src={IMG(previewInst.card.id)} alt="" width="88" style={{ borderRadius: 5, objectFit: "cover", flexShrink: 0, background: C.panel2, alignSelf: "flex-start" }} onError={(e) => (e.target.style.visibility = "hidden")} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.25 }}>{previewInst.card.name}</div>
+                <div className="mono" style={{ fontSize: 10, color: FRAME[frameKey(previewInst.card.frameType)].bg, marginTop: 3, textTransform: "uppercase", letterSpacing: ".04em" }}>
+                  {previewInst.card.type || ""}{previewInst.card.level != null ? ` · Lv/Rk ${previewInst.card.level}` : ""}
                 </div>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
-                {actionsFor(sel).map((a) => (
-                  <button key={a.l} onClick={a.go} style={{ textAlign: "left", background: C.panel2, border: `1px solid ${C.line}`, color: C.text, borderRadius: 5, padding: "6px 9px", fontSize: 11.5 }}>{a.l}</button>
-                ))}
+                {previewInst.card.atk != null && (
+                  <div className="mono" style={{ fontSize: 11, color: C.gold, marginTop: 2 }}>ATK {previewInst.card.atk} / DEF {previewInst.card.def ?? "—"}</div>
+                )}
+                <div style={{ fontSize: 10.5, color: C.mute, marginTop: 6, lineHeight: 1.4, maxHeight: 96, overflowY: "auto" }}>{previewInst.card.desc}</div>
               </div>
             </div>
           ) : (
-            <p className="mono" style={{ fontSize: 11, color: C.mute, lineHeight: 1.6 }}>Click any card — hand, field, or a pile — to see what you can do with it. Green zones are valid drop targets while placing.</p>
+            <p className="mono" style={{ fontSize: 11, color: C.mute, lineHeight: 1.6 }}>Hover any card to preview it. Click one — hand, field, or a pile — for its actions. Declare an attack, then click a pulsing enemy monster to auto-resolve damage.</p>
+          )}
+          {selInst && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
+              <div className="mono" style={{ fontSize: 9.5, color: C.mute, textTransform: "uppercase", letterSpacing: ".08em" }}>{plabel(sel.p)} · {sel.loc.toUpperCase()} — actions</div>
+              {actionsFor(sel).map((a) => (
+                <button key={a.l} onClick={a.go} style={{ textAlign: "left", background: C.panel2, border: `1px solid ${a.l[0] === "⚔" ? C.bad : C.line}`, color: a.l[0] === "⚔" ? C.bad : C.text, borderRadius: 5, padding: "6px 9px", fontSize: 11.5 }}>{a.l}</button>
+              ))}
+            </div>
           )}
         </div>
         <div style={{ padding: "8px 12px", flex: 1, overflowY: "auto", minHeight: 0 }}>
           <div className="disp" style={{ fontSize: 10, color: C.mute, marginBottom: 6 }}>Game Log</div>
           {[...game.log].reverse().map((e, i) => (
-            <div key={i} className="mono" style={{ fontSize: 10.5, color: e.m.startsWith("—") ? C.gold : C.text, opacity: e.m.startsWith("—") ? 1 : 0.82, padding: "2px 0", borderBottom: `1px solid ${C.panel}` }}>
+            <div key={i} className="mono" style={{ fontSize: 10.5, color: e.m.startsWith("—") ? C.gold : e.m[0] === "⚔" ? C.bad : C.text, opacity: e.m.startsWith("—") ? 1 : 0.88, padding: "2px 0", borderBottom: `1px solid ${C.panel}` }}>
               <span style={{ color: C.mute }}>T{e.t} </span>{e.m}
             </div>
           ))}
@@ -1033,13 +1113,18 @@ function DuelBoard({ main, extra }) {
 
 const miniBar = () => ({ background: "transparent", border: `1px solid ${C.line}`, color: C.text, borderRadius: 5, padding: "5px 9px", fontSize: 11 });
 
-function DuelCard({ inst, onClick, selected, highlight }) {
+function DuelCard({ inst, onClick, onHover, selected, target, attacker }) {
   const c = inst.card, f = FRAME[frameKey(c.frameType)];
   const back = inst.pos === "set" || inst.pos === "settrap";
   const rot = inst.pos === "def" || inst.pos === "set";
+  const isMon = !/spell|trap/.test(c.frameType || "");
+  const bd = selected ? C.gold : attacker ? C.bad : target ? C.bad : shade(f.bg, 22);
   return (
-    <button onClick={onClick} title={c.name} style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", display: "grid", placeItems: "center", width: "100%", height: "100%" }}>
-      <div style={{ width: 46, height: 67, borderRadius: 4, overflow: "hidden", transform: rot ? "rotate(90deg) scale(.82)" : "none", border: `2px solid ${selected ? C.gold : highlight ? C.good : shade(f.bg, 22)}`, boxShadow: selected ? `0 0 9px ${C.gold}` : "none", background: C.panel2 }}>
+    <button onClick={onClick} onMouseEnter={() => onHover?.(inst)} onMouseLeave={() => onHover?.(null)}
+      title={c.name} className={target ? "dcard atktarget" : "dcard"}
+      style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer", display: "grid", placeItems: "center", width: "100%", height: "100%" }}>
+      <div style={{ position: "relative", width: 50, height: 73, borderRadius: 4, overflow: "hidden", transform: rot ? "rotate(90deg) scale(.82)" : "none",
+        border: `2px solid ${bd}`, boxShadow: selected ? `0 0 10px ${C.gold}` : attacker ? `0 0 10px ${C.bad}` : "none", background: C.panel2 }}>
         {back ? (
           <div style={{ width: "100%", height: "100%", background: `repeating-linear-gradient(45deg, ${shade(f.bg, -18)} 0 4px, ${shade(f.bg, -34)} 4px 8px)`, display: "grid", placeItems: "center" }}>
             <div style={{ width: "40%", height: "40%", transform: "rotate(45deg)", background: `linear-gradient(${C.gold}, ${C.goldDim})`, borderRadius: 3, opacity: 0.85 }} />
@@ -1047,23 +1132,33 @@ function DuelCard({ inst, onClick, selected, highlight }) {
         ) : (
           <img src={IMG(c.id, true)} alt={c.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={(e) => (e.target.style.opacity = 0)} />
         )}
+        {!back && isMon && c.atk != null && (
+          <span className="mono" style={{ position: "absolute", left: 0, right: 0, bottom: 0, fontSize: 8, textAlign: "center", color: "#fff", background: "rgba(0,0,0,.62)", letterSpacing: ".02em" }}>
+            {c.atk}/{c.def ?? "—"}
+          </span>
+        )}
       </div>
     </button>
   );
 }
 
-function Slot({ inst, valid, selected, onClick, label }) {
+function Slot({ inst, valid, selected, target, attacker, onClick, onHover, label }) {
   return (
-    <div onClick={onClick} style={{ width: 52, height: 74, flexShrink: 0, borderRadius: 5, display: "grid", placeItems: "center", border: `1px ${inst ? "solid" : "dashed"} ${valid ? C.good : inst ? shade(C.line, 8) : C.line}`, background: valid ? "rgba(79,191,123,.14)" : "rgba(255,255,255,.015)", cursor: valid ? "pointer" : inst ? "pointer" : "default" }}>
-      {inst ? <DuelCard inst={inst} onClick={onClick} selected={selected} /> : <span className="mono" style={{ fontSize: 8, color: C.mute }}>{label}</span>}
+    <div onClick={onClick} className={target ? "atktarget" : undefined}
+      style={{ width: 54, height: 78, flexShrink: 0, borderRadius: 5, display: "grid", placeItems: "center",
+        border: `1px ${inst ? "solid" : "dashed"} ${valid ? C.good : target ? C.bad : inst ? shade(C.line, 8) : C.line}`,
+        background: valid ? "rgba(79,191,123,.16)" : "rgba(255,255,255,.02)", cursor: valid || target || inst ? "pointer" : "default" }}>
+      {inst ? <DuelCard inst={inst} onClick={onClick} onHover={onHover} selected={selected} target={target} attacker={attacker} />
+        : <span className="mono" style={{ fontSize: 8, color: C.mute }}>{label}</span>}
     </div>
   );
 }
 
-function Pile({ label, list, onClick }) {
+function Pile({ label, list, onClick, onHover }) {
   const top = list[list.length - 1];
   return (
-    <button onClick={onClick} style={{ width: 52, height: 74, flexShrink: 0, border: `1px solid ${C.line}`, borderRadius: 5, background: C.panel, cursor: "pointer", position: "relative", overflow: "hidden", padding: 0 }}>
+    <button onClick={onClick} onMouseEnter={() => top && onHover?.(top)} onMouseLeave={() => onHover?.(null)}
+      style={{ width: 54, height: 78, flexShrink: 0, border: `1px solid ${C.line}`, borderRadius: 5, background: C.panel, cursor: "pointer", position: "relative", overflow: "hidden", padding: 0 }}>
       {top && <img src={IMG(top.card.id, true)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.45 }} onError={(e) => (e.target.style.opacity = 0)} />}
       <span className="mono" style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 9, color: C.text, textShadow: "0 1px 3px #000", flexDirection: "column" }}>
         <b>{label}</b><br />{list.length}
@@ -1072,45 +1167,56 @@ function Pile({ label, list, onClick }) {
   );
 }
 
-function PlayerField({ p, P, game, onZone, canPlace, sel, setSel, setViewer, drawCard, shuffleDeck, changeLP, dmg, hideHand, top }) {
+/* one player's half of the mat. Rendered identically for both players; the
+   parent rotates P2's copy 180° so each player's monsters sit against the
+   centre line and each hand faces its own player. Row order (centre → edge):
+   monsters, spell/trap, hand, life points. */
+function PlayerField({ p, P, game, onZone, canPlace, atkTarget, attackFrom, sel, setSel, setViewer, setHover, drawCard, shuffleDeck, changeLP, dmg, hideHand }) {
   const pl = P[p];
+  const active = p === game.active;
   const selMatch = (loc, idx) => sel && sel.p === p && sel.loc === loc && sel.idx === idx;
+  const isAtkFrom = (loc, idx) => attackFrom && attackFrom.p === p && attackFrom.loc === loc && attackFrom.idx === idx;
+
   const monRow = [0, 1, 2, 3, 4].map((i) => (
-    <Slot key={"m" + i} inst={pl.mzones[i]} valid={canPlace(p, "m", i)} selected={selMatch("m", i)} onClick={() => onZone(p, "m", i)} label="M" />
+    <Slot key={"m" + i} inst={pl.mzones[i]} valid={canPlace(p, "m", i)} target={atkTarget(p, "m", i)} attacker={isAtkFrom("m", i)}
+      selected={selMatch("m", i)} onClick={() => onZone(p, "m", i)} onHover={setHover} label="M" />
   ));
   const stRow = [0, 1, 2, 3, 4].map((i) => (
-    <Slot key={"s" + i} inst={pl.szones[i]} valid={canPlace(p, "s", i)} selected={selMatch("s", i)} onClick={() => onZone(p, "s", i)} label="S/T" />
+    <Slot key={"s" + i} inst={pl.szones[i]} valid={canPlace(p, "s", i)} selected={selMatch("s", i)} onClick={() => onZone(p, "s", i)} onHover={setHover} label="S/T" />
   ));
   const piles = (
     <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
-      <Slot inst={pl.field} valid={canPlace(p, "field", 0)} selected={selMatch("field", 0)} onClick={() => onZone(p, "field", 0)} label="Field" />
-      <Pile label="GY" list={pl.gy} onClick={() => setViewer({ p, pile: "gy" })} />
-      <Pile label="Ban" list={pl.banish} onClick={() => setViewer({ p, pile: "banish" })} />
-      <Pile label="Extra" list={pl.extra} onClick={() => setViewer({ p, pile: "extra" })} />
-      <button onClick={() => drawCard(p)} style={{ width: 52, height: 74, border: `1px solid ${C.gold}`, borderRadius: 5, background: `linear-gradient(160deg, ${shade(C.gold, -30)}, #1a130a)`, cursor: "pointer", color: C.gold }} className="mono" title="Draw">
-        <div style={{ fontSize: 9 }}>DECK</div><div style={{ fontSize: 14, fontWeight: 700 }}>{pl.deck.length}</div><div style={{ fontSize: 8 }}>draw</div>
+      <Slot inst={pl.field} valid={canPlace(p, "field", 0)} selected={selMatch("field", 0)} onClick={() => onZone(p, "field", 0)} onHover={setHover} label="Field" />
+      <Pile label="GY" list={pl.gy} onClick={() => setViewer({ p, pile: "gy" })} onHover={setHover} />
+      <Pile label="Ban" list={pl.banish} onClick={() => setViewer({ p, pile: "banish" })} onHover={setHover} />
+      <Pile label="Extra" list={pl.extra} onClick={() => setViewer({ p, pile: "extra" })} onHover={setHover} />
+      <button onClick={() => drawCard(p)} style={{ width: 54, height: 78, border: `1px solid ${C.gold}`, borderRadius: 5, background: `linear-gradient(160deg, ${shade(C.gold, -30)}, #1a130a)`, cursor: "pointer", color: C.gold }} className="mono" title="Draw a card">
+        <div style={{ fontSize: 9 }}>DECK</div><div style={{ fontSize: 15, fontWeight: 700 }}>{pl.deck.length}</div><div style={{ fontSize: 8 }}>draw</div>
       </button>
-      <button onClick={() => shuffleDeck(p)} style={miniBar()} title="Shuffle">⤨</button>
+      <button onClick={() => shuffleDeck(p)} style={miniBar()} title="Shuffle deck">⤨</button>
       <button onClick={() => setViewer({ p, pile: "deck" })} style={miniBar()}>view</button>
     </div>
   );
 
   const lp = (
-    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <span className="mono" style={{ fontSize: 10, color: C.mute }}>{p === 0 ? "P1" : "P2"} LP</span>
-      <button onClick={() => changeLP(p, -dmg)} style={{ ...miniBar(), color: C.bad, padding: "3px 7px" }}>−{dmg}</button>
-      <span className="mono" style={{ fontSize: 18, fontWeight: 700, color: pl.lp > 4000 ? C.good : pl.lp > 1500 ? C.gold : C.bad, minWidth: 58, textAlign: "center" }}>{pl.lp}</span>
-      <button onClick={() => changeLP(p, dmg)} style={{ ...miniBar(), color: C.good, padding: "3px 7px" }}>+{dmg}</button>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span className="mono" style={{ fontSize: 11, color: active ? C.gold : C.mute, fontWeight: 700 }}>{p === 0 ? "P1" : "P2"}</span>
+        <button onClick={() => changeLP(p, -dmg)} style={{ ...miniBar(), color: C.bad, padding: "3px 7px" }}>−{dmg}</button>
+        <span key={pl.lp} className="mono lpnum" style={{ fontSize: 19, fontWeight: 700, color: pl.lp > 4000 ? C.good : pl.lp > 1500 ? C.gold : C.bad, minWidth: 60, textAlign: "center" }}>{pl.lp}</span>
+        <button onClick={() => changeLP(p, dmg)} style={{ ...miniBar(), color: C.good, padding: "3px 7px" }}>+{dmg}</button>
+      </div>
+      <span className="mono" style={{ fontSize: 9, color: pl.normalSummoned ? C.bad : C.mute }}>{pl.normalSummoned ? "normal summon used" : "normal summon ready"}</span>
     </div>
   );
 
   const hand = (
-    <div style={{ display: "flex", gap: 4, justifyContent: "center", flexWrap: "wrap", minHeight: 70, padding: "2px 0" }}>
+    <div style={{ display: "flex", gap: 4, justifyContent: "center", flexWrap: "wrap", minHeight: 74, padding: "2px 0" }}>
       {pl.hand.map((inst, i) =>
         hideHand ? (
-          <div key={inst.uid} style={{ width: 46, height: 67, borderRadius: 4, background: `repeating-linear-gradient(45deg, ${shade(C.gold, -30)} 0 4px, #14100a 4px 8px)`, border: `1px solid ${C.line}` }} />
+          <div key={inst.uid} style={{ width: 50, height: 73, borderRadius: 4, background: `repeating-linear-gradient(45deg, ${shade(C.gold, -30)} 0 4px, #14100a 4px 8px)`, border: `1px solid ${C.line}` }} />
         ) : (
-          <DuelCard key={inst.uid} inst={inst} onClick={() => setSel({ p, loc: "hand", idx: i })} selected={selMatch("hand", i)} />
+          <DuelCard key={inst.uid} inst={inst} onClick={() => setSel({ p, loc: "hand", idx: i })} onHover={setHover} selected={selMatch("hand", i)} />
         )
       )}
       {pl.hand.length === 0 && <span className="mono" style={{ fontSize: 10, color: C.mute, alignSelf: "center" }}>empty hand</span>}
@@ -1118,33 +1224,35 @@ function PlayerField({ p, P, game, onZone, canPlace, sel, setSel, setViewer, dra
   );
 
   const board = (
-    <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "center", flexWrap: "wrap" }}>
+    <div style={{ display: "flex", gap: 14, alignItems: "center", justifyContent: "center", flexWrap: "wrap" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-        <div style={{ display: "flex", gap: 5 }}>{top ? stRow : monRow}</div>
-        <div style={{ display: "flex", gap: 5 }}>{top ? monRow : stRow}</div>
+        <div style={{ display: "flex", gap: 5 }}>{monRow}</div>
+        <div style={{ display: "flex", gap: 5 }}>{stRow}</div>
       </div>
       {piles}
     </div>
   );
 
   return (
-    <div style={{ background: p === game.active ? "rgba(232,184,75,.05)" : "transparent", borderRadius: 10, padding: "8px 10px", border: `1px solid ${p === game.active ? shade(C.gold, -50) : C.line}` }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>{lp}<span className="mono" style={{ fontSize: 9, color: pl.normalSummoned ? C.bad : C.mute }}>{pl.normalSummoned ? "normal summon used" : "normal summon ready"}</span></div>
-      {top && hand}
+    <div style={{ background: active ? "rgba(232,184,75,.06)" : "transparent", borderRadius: 10, padding: "8px 10px", border: `1px solid ${active ? shade(C.gold, -45) : "transparent"}`, transition: "background .3s" }}>
       {board}
-      {!top && hand}
+      {hand}
+      {lp}
     </div>
   );
 }
 
-function EMZRow({ game, onZone, canPlace, sel }) {
+function EMZRow({ game, onZone, canPlace, atkTarget, sel, setHover }) {
   return (
-    <div style={{ display: "flex", gap: 40, justifyContent: "center", alignItems: "center", padding: "2px 0" }}>
-      <span className="mono" style={{ fontSize: 8, color: C.mute }}>EXTRA MONSTER ZONES</span>
+    <div style={{ display: "flex", gap: 34, justifyContent: "center", alignItems: "center", padding: "3px 0", borderTop: `1px dashed ${shade(C.good, -55)}`, borderBottom: `1px dashed ${shade(C.good, -55)}` }}>
+      <span className="mono" style={{ fontSize: 8, color: shade(C.good, 30), letterSpacing: ".12em" }}>◄ EXTRA MONSTER ZONES</span>
       {[0, 1].map((i) => (
-        <Slot key={i} inst={game.emz[i]?.inst} valid={canPlace(0, "emz", i) || canPlace(1, "emz", i)} selected={sel && sel.loc === "emz" && sel.idx === i} onClick={() => onZone(sel?.p ?? game.active, "emz", i)} label="EMZ" />
+        <Slot key={i} inst={game.emz[i]?.inst} valid={canPlace(0, "emz", i) || canPlace(1, "emz", i)}
+          target={atkTarget(0, "emz", i) || atkTarget(1, "emz", i)}
+          selected={sel && sel.loc === "emz" && sel.idx === i}
+          onClick={() => { const e = game.emz[i]; onZone(e ? e.owner : (sel?.p ?? game.active), "emz", i); }} onHover={setHover} label="EMZ" />
       ))}
-      <span className="mono" style={{ fontSize: 8, color: C.mute }}>SHARED</span>
+      <span className="mono" style={{ fontSize: 8, color: shade(C.good, 30), letterSpacing: ".12em" }}>SHARED ►</span>
     </div>
   );
 }
