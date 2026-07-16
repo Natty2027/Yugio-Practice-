@@ -22,6 +22,13 @@ function shade(hex, amt) {
   const r = cl((n >> 16) + amt), g = cl(((n >> 8) & 255) + amt), b = cl((n & 255) + amt);
   return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
 }
+/* hex → rgba string with alpha */
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`;
+}
+/* Master Duel-ish zone tones */
+const ZONE = { mon: "#d8a13a", st: "#2fa6a0", emz: "#8a6bff", field: "#3fa96a", extra: "#8a6bff", pile: "#5a6a86" };
 
 /* ---- design tokens ---------------------------------------------------- */
 const C = {
@@ -74,31 +81,31 @@ const SAMPLE = [
   ["Blue-Eyes White Dragon", 89631139, "normal", 3],
   ["Blue-Eyes Alternative White Dragon", 38517737, "effect", 3],
   ["Sage with Eyes of Blue", 79852326, "effect", 3],
-  ["Maiden with Eyes of Blue", 90107874, "effect", 2],
-  ["Master with Eyes of Blue", 44499451, "effect", 1],
+  ["Maiden with Eyes of Blue", 88241506, "effect", 2],
+  ["Master with Eyes of Blue", 45644898, "effect", 1],
   ["Ash Blossom & Joyous Spring", 14558127, "effect", 3],
   ["Maxx \"C\"", 23434538, "effect", 3],
   ["Effect Veiler", 97268402, "effect", 2],
   ["Nibiru, the Primal Being", 27204311, "effect", 1],
   ["Dragon Shrine", 81275020, "spell", 2],
-  ["Melody of Awakening Dragon", 99377036, "spell", 2],
-  ["Trade-In", 47198645, "spell", 3],
-  ["Pot of Extravagance", 30617361, "spell", 2],
+  ["The Melody of Awakening Dragon", 48800175, "spell", 2],
+  ["Trade-In", 38120068, "spell", 3],
+  ["Pot of Extravagance", 49238328, "spell", 2],
   ["Called by the Grave", 24224830, "spell", 2],
   ["Monster Reborn", 83764718, "spell", 1],
   ["Harpie's Feather Duster", 18144506, "spell", 1],
-  ["Return of the Dragon Lords", 55295243, "spell", 2],
+  ["Return of the Dragon Lords", 6853254, "spell", 2],
   ["Infinite Impermanence", 10045474, "trap", 3],
   ["Solemn Judgment", 41420027, "trap", 1],
   // extra
   ["Blue-Eyes Twin Burst Dragon", 20721928, "fusion", 2],
-  ["Blue-Eyes Spirit Dragon", 25336944, "synchro", 2],
+  ["Blue-Eyes Spirit Dragon", 59822133, "synchro", 2],
   ["Azure-Eyes Silver Dragon", 30576089, "synchro", 2],
   ["Crystal Wing Synchro Dragon", 50954680, "synchro", 1],
   ["Stardust Dragon", 44508094, "synchro", 1],
   ["Number 38: Hope Harbinger Dragon Titanic Galaxy", 33776843, "xyz", 2],
-  ["Galaxy-Eyes Cipher Dragon", 45883035, "xyz", 1],
-  ["Hieratic Seal of the Heavenly Spheres", 76877732, "xyz", 2],
+  ["Galaxy-Eyes Cipher Dragon", 18963306, "xyz", 1],
+  ["Hieratic Seal of the Heavenly Spheres", 24361622, "xyz", 2],
   ["I:P Masquerena", 65741786, "link", 1],
   ["Accesscode Talker", 86066372, "link", 1],
 ];
@@ -134,24 +141,25 @@ export default function App() {
   const [online, setOnline] = useState(null);
   const [toast, setToast] = useState("");
 
-  /* hydrate sample deck once */
+  /* hydrate sample deck once — fetch by passcode so every card gets real art,
+     stats and effect text (IDs are exact; name matching misses on punctuation) */
   useEffect(() => {
     let alive = true;
     (async () => {
-      const names = SAMPLE.map((s) => s[0]);
-      let byName = {};
+      const ids = SAMPLE.map((s) => s[1]);
+      let byId = {};
       try {
-        const res = await fetch(`${API}?misc=yes&name=${encodeURIComponent(names.join("|"))}`);
+        const res = await fetch(`${API}?misc=yes&id=${ids.join(",")}`);
         const j = await res.json();
-        if (j.data) j.data.forEach((c) => (byName[c.name] = c));
+        if (j.data) j.data.forEach((c) => (byId[c.id] = c));
         if (alive) setOnline(true);
       } catch { if (alive) setOnline(false); }
       const m = [], x = [];
       SAMPLE.forEach(([name, id, ft, n]) => {
-        const real = byName[name];
+        const real = byId[id];
         const card = real
           ? normalize(real)
-          : { id, name, frameType: ft, type: ft, level: null, atk: null, def: null, attribute: null, race: null, desc: "" };
+          : { id, name, frameType: ft, type: ft, level: null, atk: null, def: null, attribute: null, race: null, desc: "(effect text unavailable offline)" };
         for (let i = 0; i < n; i++) (isExtra(card.frameType) ? x : m).push(card);
       });
       if (alive) { setMain(m); setExtra(x); }
@@ -356,11 +364,11 @@ function Editor({ main, extra, side, setMain, setExtra, setSide, addCard, remove
     const ids = [...new Set([...sec.main, ...sec.extra, ...sec.side])];
     let byId = {};
     try {
-      const r = await fetch(`${API}?id=${ids.join(",")}`);
+      const r = await fetch(`${API}?misc=yes&id=${ids.join(",")}`);
       const j = await r.json();
       (j.data || []).forEach((c) => (byId[c.id] = normalize(c)));
     } catch { flash("Couldn't fetch card data (offline)"); }
-    const build = (arr) => arr.map((id) => byId[id] || { id, name: `#${id}`, frameType: "effect", type: "?", level: null }).filter(Boolean);
+    const build = (arr) => arr.map((id) => byId[id] || { id, name: `#${id}`, frameType: "effect", type: "?", level: null, desc: "" }).filter(Boolean);
     setMain(build(sec.main)); setExtra(build(sec.extra)); setSide(build(sec.side));
     flash(`Imported ${sec.main.length}+${sec.extra.length}+${sec.side.length}`);
   };
@@ -1205,8 +1213,8 @@ function DuelBoard({ main, extra }) {
 
         {/* the duel mat — field in the middle, each player's half facing them */}
         <div style={{ flex: 1, borderRadius: 14, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6,
-          background: "radial-gradient(120% 80% at 50% 50%, #123024 0%, #0c1f18 55%, #08130e 100%)",
-          border: `1px solid ${shade(C.good, -70)}`, boxShadow: "inset 0 0 60px rgba(0,0,0,.55)" }}>
+          background: `radial-gradient(70% 55% at 50% 0%, ${hexA(ZONE.st, 0.1)}, transparent 62%), radial-gradient(70% 55% at 50% 100%, ${hexA(ZONE.mon, 0.09)}, transparent 62%), linear-gradient(180deg, #0e1424 0%, #0a0f1b 50%, #0e1424 100%)`,
+          border: `1px solid ${C.line}`, boxShadow: "inset 0 0 80px rgba(0,0,0,.62), 0 2px 20px rgba(0,0,0,.4)" }}>
           {/* opponent (P2) — rotated 180° so the whole half faces them across the table */}
           <div style={{ transform: "rotate(180deg)" }}>
             <PlayerField p={1} P={P} game={game} onZone={onZone} canPlace={canPlace} atkTarget={atkTarget} tribTarget={canTribute} isTrib={isTrib} attackFrom={attackFrom} sel={sel} setSel={setSel} setViewer={setViewer} setHover={setHover} drawCard={drawCard} shuffleDeck={shuffleDeck} changeLP={changeLP} dmg={dmg} hideHand={hideHands} />
@@ -1306,16 +1314,18 @@ function DuelCard({ inst, onClick, onHover, selected, target, attacker }) {
   );
 }
 
-function Slot({ inst, valid, selected, target, attacker, trib, tribbed, onClick, onHover, label }) {
-  const bd = valid ? C.good : target ? C.bad : trib ? C.gold : tribbed ? C.gold : inst ? shade(C.line, 8) : C.line;
+function Slot({ inst, valid, selected, target, attacker, trib, tribbed, tone = ZONE.mon, onClick, onHover, label }) {
+  const bd = valid ? C.good : target ? C.bad : (trib || tribbed) ? C.gold : inst ? shade(tone, -6) : hexA(tone, 0.45);
+  const bg = valid ? hexA(C.good, 0.18) : trib ? hexA(C.gold, 0.14)
+    : `radial-gradient(120% 120% at 50% 35%, ${hexA(tone, 0.14)}, rgba(4,7,12,.5))`;
   return (
     <div onClick={onClick} className={target || trib ? "atktarget" : undefined}
-      style={{ position: "relative", width: 52, height: 75, flexShrink: 0, borderRadius: 5, display: "grid", placeItems: "center",
-        border: `1px ${inst ? "solid" : "dashed"} ${bd}`,
-        background: valid ? "rgba(79,191,123,.16)" : trib ? "rgba(232,184,75,.12)" : "rgba(255,255,255,.025)",
-        cursor: valid || target || trib || inst ? "pointer" : "default", boxShadow: tribbed ? `0 0 8px ${C.gold}` : "none" }}>
+      style={{ position: "relative", width: 52, height: 75, flexShrink: 0, borderRadius: 6, display: "grid", placeItems: "center",
+        border: `1.5px solid ${bd}`, background: bg,
+        boxShadow: tribbed ? `0 0 8px ${C.gold}` : inst ? "none" : `inset 0 0 10px ${hexA(tone, 0.18)}`,
+        cursor: valid || target || trib || inst ? "pointer" : "default" }}>
       {inst ? <DuelCard inst={inst} onClick={onClick} onHover={onHover} selected={selected} target={target} attacker={attacker} />
-        : <span className="mono" style={{ fontSize: 8, color: shade(C.mute, -20) }}>{label}</span>}
+        : <span className="mono" style={{ fontSize: 7.5, color: hexA(tone, 0.85), letterSpacing: ".06em", fontWeight: 700 }}>{label}</span>}
       {tribbed && <span className="mono" style={{ position: "absolute", top: 1, left: 2, fontSize: 8, fontWeight: 700, color: "#1a1206", background: C.gold, borderRadius: 3, padding: "0 3px" }}>TRB</span>}
     </div>
   );
@@ -1346,17 +1356,17 @@ function PlayerField({ p, P, game, onZone, canPlace, atkTarget, tribTarget, isTr
   const isAtkFrom = (loc, idx) => attackFrom && attackFrom.p === p && attackFrom.loc === loc && attackFrom.idx === idx;
 
   const monRow = [0, 1, 2, 3, 4].map((i) => (
-    <Slot key={"m" + i} inst={pl.mzones[i]} valid={canPlace(p, "m", i)} target={atkTarget(p, "m", i)} attacker={isAtkFrom("m", i)}
+    <Slot key={"m" + i} inst={pl.mzones[i]} tone={ZONE.mon} valid={canPlace(p, "m", i)} target={atkTarget(p, "m", i)} attacker={isAtkFrom("m", i)}
       trib={tribTarget(p, "m", i)} tribbed={isTrib(p, "m", i)}
       selected={selMatch("m", i)} onClick={() => onZone(p, "m", i)} onHover={setHover} label="M" />
   ));
   const stRow = [0, 1, 2, 3, 4].map((i) => (
-    <Slot key={"s" + i} inst={pl.szones[i]} valid={canPlace(p, "s", i)} selected={selMatch("s", i)} onClick={() => onZone(p, "s", i)} onHover={setHover} label="S/T" />
+    <Slot key={"s" + i} inst={pl.szones[i]} tone={ZONE.st} valid={canPlace(p, "s", i)} selected={selMatch("s", i)} onClick={() => onZone(p, "s", i)} onHover={setHover} label="S / T" />
   ));
 
   const leftCol = (
     <div style={{ display: "flex", flexDirection: "column", gap: 5, justifyContent: "center" }}>
-      <Slot inst={pl.field} valid={canPlace(p, "field", 0)} selected={selMatch("field", 0)} onClick={() => onZone(p, "field", 0)} onHover={setHover} label="FIELD" />
+      <Slot inst={pl.field} tone={ZONE.field} valid={canPlace(p, "field", 0)} selected={selMatch("field", 0)} onClick={() => onZone(p, "field", 0)} onHover={setHover} label="FIELD" />
       <Pile label="EXTRA" list={pl.extra} onClick={() => setViewer({ p, pile: "extra" })} onHover={setHover} accent={C.gold} />
     </div>
   );
@@ -1378,15 +1388,30 @@ function PlayerField({ p, P, game, onZone, canPlace, atkTarget, tribTarget, isTr
     </div>
   );
 
+  const lpPct = Math.max(0, Math.min(100, (pl.lp / 8000) * 100));
+  const lpCol = pl.lp > 4000 ? C.good : pl.lp > 1500 ? C.gold : C.bad;
   const lp = (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 4px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span className="disp" style={{ fontSize: 12, color: active ? C.gold : C.mute }}>{p === 0 ? "P1" : "P2"}</span>
-        <button onClick={() => changeLP(p, -dmg)} style={{ ...miniBar(), color: C.bad, padding: "3px 7px" }}>−{dmg}</button>
-        <span key={pl.lp} className="mono lpnum" style={{ fontSize: 20, fontWeight: 700, color: pl.lp > 4000 ? C.good : pl.lp > 1500 ? C.gold : C.bad, minWidth: 62, textAlign: "center" }}>{pl.lp}</span>
-        <button onClick={() => changeLP(p, dmg)} style={{ ...miniBar(), color: C.good, padding: "3px 7px" }}>+{dmg}</button>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "3px 6px", background: active ? hexA(C.gold, 0.07) : "rgba(0,0,0,.25)", borderRadius: 8, border: `1px solid ${active ? shade(C.gold, -40) : C.line}` }}>
+      {/* avatar + name */}
+      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+        <div className="disp" style={{ width: 26, height: 26, borderRadius: "50%", display: "grid", placeItems: "center", fontSize: 11, color: "#0b0e1a", background: `radial-gradient(circle at 35% 30%, ${shade(lpCol, 40)}, ${shade(lpCol, -30)})`, boxShadow: active ? `0 0 8px ${hexA(C.gold, 0.6)}` : "none" }}>{p === 0 ? "P1" : "P2"}</div>
       </div>
-      <span className="mono" style={{ fontSize: 9, color: pl.normalSummoned ? C.bad : C.good }}>{pl.normalSummoned ? "● NS used" : "○ NS ready"}</span>
+      {/* LP bar */}
+      <div style={{ flex: 1, minWidth: 90 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <span className="mono" style={{ fontSize: 8.5, color: C.mute, letterSpacing: ".14em" }}>LP</span>
+          <span key={pl.lp} className="mono lpnum" style={{ fontSize: 16, fontWeight: 700, color: lpCol, lineHeight: 1 }}>{pl.lp}</span>
+        </div>
+        <div style={{ height: 6, borderRadius: 4, background: "rgba(0,0,0,.5)", overflow: "hidden", marginTop: 2, border: `1px solid ${hexA(lpCol, 0.3)}` }}>
+          <div style={{ width: `${lpPct}%`, height: "100%", background: `linear-gradient(90deg, ${shade(lpCol, -20)}, ${lpCol})`, transition: "width .45s ease" }} />
+        </div>
+      </div>
+      {/* quick damage + NS status */}
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <button onClick={() => changeLP(p, -dmg)} style={{ ...miniBar(), color: C.bad, padding: "3px 6px", fontSize: 10 }}>−{dmg}</button>
+        <button onClick={() => changeLP(p, dmg)} style={{ ...miniBar(), color: C.good, padding: "3px 6px", fontSize: 10 }}>+{dmg}</button>
+        <span className="mono" style={{ fontSize: 8.5, color: pl.normalSummoned ? C.bad : C.good, whiteSpace: "nowrap" }}>{pl.normalSummoned ? "NS ✓" : "NS ○"}</span>
+      </div>
     </div>
   );
 
@@ -1425,10 +1450,10 @@ function PlayerField({ p, P, game, onZone, canPlace, atkTarget, tribTarget, isTr
 
 function EMZRow({ game, onZone, canPlace, atkTarget, tribTarget, isTrib, sel, setHover }) {
   return (
-    <div style={{ display: "flex", gap: 34, justifyContent: "center", alignItems: "center", padding: "3px 0", borderTop: `1px dashed ${shade(C.good, -55)}`, borderBottom: `1px dashed ${shade(C.good, -55)}` }}>
-      <span className="mono" style={{ fontSize: 8, color: shade(C.good, 30), letterSpacing: ".12em" }}>◄ EXTRA MONSTER ZONES</span>
+    <div style={{ display: "flex", gap: 34, justifyContent: "center", alignItems: "center", padding: "5px 0", borderTop: `1px solid ${hexA(ZONE.emz, 0.35)}`, borderBottom: `1px solid ${hexA(ZONE.emz, 0.35)}`, background: `linear-gradient(90deg, transparent, ${hexA(ZONE.emz, 0.06)}, transparent)` }}>
+      <span className="mono" style={{ fontSize: 8, color: hexA(ZONE.emz, 0.85), letterSpacing: ".12em" }}>◄ EXTRA MONSTER ZONES</span>
       {[0, 1].map((i) => (
-        <Slot key={i} inst={game.emz[i]?.inst} valid={canPlace(0, "emz", i) || canPlace(1, "emz", i)}
+        <Slot key={i} inst={game.emz[i]?.inst} tone={ZONE.emz} valid={canPlace(0, "emz", i) || canPlace(1, "emz", i)}
           target={atkTarget(0, "emz", i) || atkTarget(1, "emz", i)}
           trib={tribTarget(0, "emz", i) || tribTarget(1, "emz", i)} tribbed={isTrib(0, "emz", i) || isTrib(1, "emz", i)}
           selected={sel && sel.loc === "emz" && sel.idx === i}
