@@ -303,7 +303,7 @@ export default function App() {
           </div>
         </div>
         <nav style={{ display: "flex", gap: 4, marginLeft: 8 }}>
-          {[["editor", "Deck Editor"], ["duel", "Duel"], ["hand", "Test Hand"], ["stats", "Probability"]].map(([k, l]) => (
+          {[["editor", "Deck Editor"], ["duel", "Duel"], ["auto", "Auto-Duel β"], ["hand", "Test Hand"], ["stats", "Probability"]].map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)} className="disp"
               style={{ fontSize: 12, padding: "8px 14px", borderRadius: 6, border: "none",
                 background: tab === k ? C.gold : "transparent",
@@ -327,6 +327,7 @@ export default function App() {
           addCard={addCard} removeOne={removeOne} countOf={countOf} flash={flash} />
       )}
       {tab === "duel" && <DuelBoard main={main} extra={extra} />}
+      {tab === "auto" && <EngineBeta main={main} />}
       {tab === "hand" && <HandTester main={main} />}
       {tab === "stats" && <Probability main={main} />}
 
@@ -1780,6 +1781,119 @@ function PileViewer({ game, viewer, setViewer, setSel, sel, actionsFor, plabel }
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ====================================================================== */
+/*  AUTO-DUEL ENGINE — Phase 1: load & self-test the ocgcore/EDOPro WASM   */
+/*  stack (engine + cards.cdb + Lua scripts) entirely from CDNs, isolated  */
+/*  so it can never break the manual app. Full duel loop is a later phase. */
+/* ====================================================================== */
+const ENGINE = {
+  core: "https://esm.sh/jsr/@n1xx1/ocgcore-wasm@0.1.3",
+  sqljs: "https://esm.sh/sql.js@1.11.0",
+  sqlWasm: "https://cdn.jsdelivr.net/npm/sql.js@1.11.0/dist/sql-wasm.wasm",
+  cdb: "https://cdn.jsdelivr.net/gh/ProjectIgnis/BabelCDB@master/cards.cdb",
+  script: (code) => `https://cdn.jsdelivr.net/gh/ProjectIgnis/CardScripts@master/official/c${code}.lua`,
+};
+
+function EngineBeta({ main }) {
+  const [steps, setSteps] = useState([]);
+  const [running, setRunning] = useState(false);
+  const dbRef = useRef(null);
+  const set = (i, patch) => setSteps((s) => s.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+
+  const run = async () => {
+    setRunning(true);
+    const plan = [
+      "Load sql.js (SQLite in the browser)",
+      "Download EDOPro card database (cards.cdb ~7.4 MB)",
+      "Query a card to prove the cardReader source works",
+      "Fetch a Lua card script (scriptReader source)",
+      "Load the ocgcore / EDOPro WASM engine",
+      "Read engine version (OCG_GetVersion)",
+    ];
+    setSteps(plan.map((label) => ({ label, state: "pending", note: "" })));
+    try {
+      // 1. sql.js
+      set(0, { state: "run" });
+      const sqlMod = await import(/* @vite-ignore */ ENGINE.sqljs);
+      const initSqlJs = sqlMod.default || sqlMod;
+      const SQL = await initSqlJs({ locateFile: () => ENGINE.sqlWasm });
+      set(0, { state: "ok", note: "sql.js ready" });
+
+      // 2. cards.cdb
+      set(1, { state: "run" });
+      const buf = await (await fetch(ENGINE.cdb)).arrayBuffer();
+      const db = new SQL.Database(new Uint8Array(buf));
+      dbRef.current = db;
+      set(1, { state: "ok", note: `${(buf.byteLength / 1e6).toFixed(1)} MB loaded` });
+
+      // 3. query a card (use a card from the loaded deck if possible)
+      set(2, { state: "run" });
+      const testId = main.find((c) => c.id)?.id || 89631139;
+      const res = db.exec(`SELECT name FROM texts WHERE id=${testId}`);
+      const nm = res?.[0]?.values?.[0]?.[0];
+      const dat = db.exec(`SELECT atk,def,level,type FROM datas WHERE id=${testId}`);
+      set(2, { state: nm ? "ok" : "warn", note: nm ? `#${testId} → “${nm}” (atk ${dat?.[0]?.values?.[0]?.[0]})` : `no row for #${testId}` });
+
+      // 4. script fetch
+      set(3, { state: "run" });
+      const sc = await fetch(ENGINE.script(testId));
+      const scText = sc.ok ? await sc.text() : "";
+      set(3, { state: sc.ok ? "ok" : "warn", note: sc.ok ? `c${testId}.lua (${scText.length} bytes)` : `no script for #${testId} (normal monster?)` });
+
+      // 5. engine wasm
+      set(4, { state: "run" });
+      const coreMod = await import(/* @vite-ignore */ ENGINE.core);
+      const createCore = coreMod.createCore || coreMod.default?.createCore;
+      if (typeof createCore !== "function") throw new Error("createCore export not found on package");
+      const core = await createCore();
+      set(4, { state: "ok", note: "WASM instantiated" });
+
+      // 6. version
+      set(5, { state: "run" });
+      let vTxt = "loaded";
+      try { const v = core.getVersion?.() || core.OCG_GetVersion?.(); if (v) vTxt = JSON.stringify(v); } catch {}
+      set(5, { state: "ok", note: vTxt });
+    } catch (e) {
+      setSteps((s) => { const i = s.findIndex((x) => x.state === "run"); return s.map((x, j) => (j === i ? { ...x, state: "fail", note: String(e.message || e) } : x)); });
+    }
+    setRunning(false);
+  };
+
+  const dot = { pending: C.mute, run: C.gold, ok: C.good, warn: C.gold, fail: C.bad };
+  return (
+    <div style={{ height: "calc(100vh - 60px)", overflowY: "auto", padding: 24, maxWidth: 760, margin: "0 auto" }}>
+      <p className="disp" style={{ color: C.gold, fontSize: 18 }}>Auto-Duel Engine · Phase 1 (beta)</p>
+      <p style={{ color: C.mute, fontSize: 13, lineHeight: 1.6, marginTop: 8 }}>
+        This is the first phase of the real <b>ygopro / EDOPro (ocgcore)</b> engine integration — the same engine
+        family Master Duel is built on — for true automatic card-effect resolution. This step just loads and
+        self-tests the whole stack in <i>your</i> browser (I can't test WASM from my side), so we confirm it works
+        before building the full duel loop and field UI. It's fully isolated — nothing here affects the manual Duel tab.
+      </p>
+      <button onClick={run} disabled={running} className="disp"
+        style={{ ...btn(), background: C.gold, color: "#1a1206", border: "none", padding: "11px 26px", fontSize: 14, marginTop: 16, opacity: running ? 0.6 : 1 }}>
+        {running ? "Running self-test…" : "Run engine self-test"}
+      </button>
+      <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 8 }}>
+        {steps.map((s, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "10px 12px" }}>
+            <span style={{ width: 10, height: 10, borderRadius: "50%", background: dot[s.state], marginTop: 4, flexShrink: 0, boxShadow: s.state === "run" ? `0 0 8px ${C.gold}` : "none" }} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, color: C.text }}>{s.label}</div>
+              {s.note && <div className="mono" style={{ fontSize: 11, color: s.state === "fail" ? C.bad : C.mute, marginTop: 2, wordBreak: "break-word" }}>{s.note}</div>}
+            </div>
+          </div>
+        ))}
+      </div>
+      {steps.length > 0 && !running && (
+        <p className="mono" style={{ fontSize: 11, color: C.mute, marginTop: 16, lineHeight: 1.6 }}>
+          Tell me which steps are green / which failed and the exact error text — that tells me whether to proceed to
+          Phase 2 (create + start a duel from your deck and run the message loop) or adjust the loader.
+        </p>
+      )}
     </div>
   );
 }
