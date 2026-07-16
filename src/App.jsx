@@ -33,6 +33,70 @@ function hexA(hex, a) {
 /* Master Duel-ish zone tones */
 const ZONE = { mon: "#d8a13a", st: "#2fa6a0", emz: "#8a6bff", field: "#3fa96a", extra: "#8a6bff", pile: "#5a6a86" };
 
+/* ---- self-contained Web Audio engine: procedural SFX + ambient music ----
+   nothing to host or license — everything is synthesised at runtime. */
+const Sound = {
+  ctx: null, master: null, sfxOn: true, musicOn: false, musicTimer: null, step: 0,
+  init() {
+    if (this.ctx) return;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      this.ctx = new AC();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = 0.5;
+      this.master.connect(this.ctx.destination);
+    } catch { /* no audio */ }
+  },
+  resume() { try { this.ctx?.resume?.(); } catch {} },
+  tone(freq, dur = 0.12, type = "sine", vol = 0.3, when = 0, dest = null) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime + when;
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(dest || this.master); o.start(t); o.stop(t + dur + 0.03);
+  },
+  noise(dur = 0.2, vol = 0.3) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const buf = this.ctx.createBuffer(1, Math.max(1, this.ctx.sampleRate * dur), this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2);
+    const src = this.ctx.createBufferSource(); src.buffer = buf;
+    const g = this.ctx.createGain(); g.gain.value = vol;
+    src.connect(g); g.connect(this.master); src.start(t); src.stop(t + dur);
+  },
+  sfx(kind) {
+    if (!this.ctx || !this.sfxOn) return;
+    this.resume();
+    switch (kind) {
+      case "click": this.tone(430, 0.05, "triangle", 0.14); break;
+      case "draw": this.tone(620, 0.07, "sine", 0.18); this.tone(880, 0.08, "sine", 0.13, 0.05); break;
+      case "summon": this.tone(300, 0.14, "sawtooth", 0.2); this.tone(460, 0.16, "sawtooth", 0.16, 0.06); this.tone(620, 0.2, "triangle", 0.14, 0.12); break;
+      case "attack": this.tone(220, 0.13, "sawtooth", 0.24); this.noise(0.12, 0.22); break;
+      case "damage": this.noise(0.24, 0.34); this.tone(110, 0.26, "square", 0.22); break;
+      case "phase": this.tone(540, 0.1, "sine", 0.14); this.tone(720, 0.12, "sine", 0.12, 0.08); break;
+      case "win": [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.32, "triangle", 0.22, i * 0.12)); break;
+      default: break;
+    }
+  },
+  // slow ambient arpeggio + bass — low and unobtrusive
+  startMusic() {
+    if (!this.ctx || this.musicTimer) return;
+    const scale = [220, 262, 294, 330, 392, 440, 523, 587];
+    this.musicTimer = setInterval(() => {
+      if (!this.musicOn) return;
+      const f = scale[this.step % scale.length]; this.step++;
+      this.tone(f, 1.5, "triangle", 0.05);
+      if (this.step % 4 === 0) this.tone(f / 2, 2.2, "sine", 0.05);
+      if (this.step % 8 === 0) this.tone(f * 1.5, 1.2, "triangle", 0.03, 0.25);
+    }, 540);
+  },
+  stopMusic() { if (this.musicTimer) { clearInterval(this.musicTimer); this.musicTimer = null; } },
+};
+
 /* ---- design tokens ---------------------------------------------------- */
 const C = {
   bg: "#0d1016",
@@ -143,6 +207,17 @@ export default function App() {
   const [side, setSide] = useState([]);
   const [online, setOnline] = useState(null);
   const [toast, setToast] = useState("");
+  const [musicOn, setMusicOn] = useState(false);
+  const [sfxOn, setSfxOn] = useState(true);
+
+  useEffect(() => { Sound.sfxOn = sfxOn; }, [sfxOn]);
+  useEffect(() => { // unlock audio on the first user gesture (browser autoplay policy)
+    const kick = () => { Sound.init(); Sound.resume(); window.removeEventListener("pointerdown", kick); };
+    window.addEventListener("pointerdown", kick);
+    return () => window.removeEventListener("pointerdown", kick);
+  }, []);
+  const toggleMusic = () => { Sound.init(); Sound.resume(); const v = !musicOn; setMusicOn(v); Sound.musicOn = v; if (v) Sound.startMusic(); else Sound.stopMusic(); };
+  const toggleSfx = () => { Sound.init(); Sound.resume(); setSfxOn((s) => !s); };
 
   /* hydrate sample deck once — fetch by passcode so every card gets real art,
      stats and effect text (IDs are exact; name matching misses on punctuation) */
@@ -197,21 +272,25 @@ export default function App() {
         ::-webkit-scrollbar-thumb{background:${C.line};border-radius:9px}
         ::-webkit-scrollbar-track{background:transparent}
         .mono{font-family:ui-monospace,'SF Mono',Menlo,monospace}
-        .disp{font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+        .disp{font-family:'Oswald',ui-sans-serif,system-ui,sans-serif;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
         button{cursor:pointer;font-family:inherit}
         .cardimg{transition:transform .12s ease, box-shadow .12s ease}
         .cardimg:hover{transform:translateY(-3px);box-shadow:0 6px 18px rgba(0,0,0,.55)}
         input,select{font-family:inherit}
         .dcard{animation:popIn .28s cubic-bezier(.2,.9,.3,1.25)}
-        .dcard:hover{filter:brightness(1.12)}
+        .dcard:hover{filter:brightness(1.14);transform:translateY(-2px)}
         .lpnum{display:inline-block;animation:lpPulse .45s ease}
         .turnbanner{animation:bannerIn .5s ease}
+        .dmgflash{position:fixed;inset:0;pointer-events:none;z-index:55;background:radial-gradient(circle at 50% 50%, transparent 38%, rgba(224,87,106,.55));animation:dmgflash .55s ease forwards}
+        .shake{animation:shake .4s ease}
         @keyframes popIn{from{transform:scale(.55) translateY(6px);opacity:0}to{transform:scale(1) translateY(0);opacity:1}}
-        @keyframes lpPulse{0%{transform:scale(1)}35%{transform:scale(1.28)}100%{transform:scale(1)}}
+        @keyframes lpPulse{0%{transform:scale(1)}35%{transform:scale(1.3);filter:brightness(1.5)}100%{transform:scale(1)}}
         @keyframes bannerIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
         @keyframes attackPulse{0%,100%{box-shadow:0 0 0 0 rgba(224,87,106,.7)}50%{box-shadow:0 0 0 5px rgba(224,87,106,0)}}
+        @keyframes dmgflash{0%{opacity:0}22%{opacity:1}100%{opacity:0}}
+        @keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-5px)}40%{transform:translateX(5px)}60%{transform:translateX(-3px)}80%{transform:translateX(3px)}}
         .atktarget{animation:attackPulse 1.1s infinite}
-        @media (prefers-reduced-motion:reduce){.cardimg,.dcard,.lpnum,.turnbanner,.atktarget{animation:none;transition:none}}
+        @media (prefers-reduced-motion:reduce){.cardimg,.dcard,.lpnum,.turnbanner,.dmgflash,.shake,.atktarget{animation:none;transition:none}}
       `}</style>
 
       {/* header */}
@@ -233,8 +312,12 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="mono" style={{ marginLeft: "auto", fontSize: 11, color: online === false ? C.bad : C.mute }}>
-          {online === null ? "connecting…" : online ? "● live db" : "○ offline (sample only)"}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          <button onClick={toggleMusic} title="Background music" style={{ background: "transparent", border: `1px solid ${musicOn ? C.gold : C.line}`, color: musicOn ? C.gold : C.mute, borderRadius: 6, padding: "5px 9px", fontSize: 12 }}>🎵</button>
+          <button onClick={toggleSfx} title="Sound effects" style={{ background: "transparent", border: `1px solid ${sfxOn ? C.gold : C.line}`, color: sfxOn ? C.gold : C.mute, borderRadius: 6, padding: "5px 9px", fontSize: 12 }}>{sfxOn ? "🔊" : "🔇"}</button>
+          <span className="mono" style={{ fontSize: 11, color: online === false ? C.bad : C.mute }}>
+            {online === null ? "connecting…" : online ? "● live db" : "○ offline"}
+          </span>
         </div>
       </header>
 
@@ -1029,6 +1112,7 @@ function DuelBoard({ main, extra }) {
   const [dmg, setDmg] = useState(1000);
   const [vsAI, setVsAI] = useState(true);              // P2 auto-plays
   const [coach, setCoach] = useState(true);            // show move suggestions
+  const [fx, setFx] = useState(0);                     // bump to replay the damage flash
   const hist = useRef([]);
   const aiTickRef = useRef(() => {});
 
@@ -1049,6 +1133,13 @@ function DuelBoard({ main, extra }) {
     hist.current = []; setGame(g); setSel(null); setPending(null); setAttackFrom(null); setViewer(null);
   };
   const commit = (mut, msg) => {
+    if (msg) { // audio + damage flash feedback
+      if (msg[0] === "🏆") Sound.sfx("win");
+      else if (msg[0] === "⚔") { Sound.sfx("attack"); if (/takes \d/.test(msg)) { setFx((f) => f + 1); setTimeout(() => Sound.sfx("damage"), 150); } }
+      else if (/Summon/.test(msg)) Sound.sfx("summon");
+      else if (/drew|Draw Phase/.test(msg)) Sound.sfx("draw");
+      else if (/Phase/.test(msg)) Sound.sfx("phase");
+    }
     setGame((g) => {
       if (!g) return g;
       hist.current.push(clone(g)); if (hist.current.length > 50) hist.current.shift();
@@ -1450,6 +1541,7 @@ function DuelBoard({ main, extra }) {
       </div>
 
       {viewer && <PileViewer game={game} viewer={viewer} setViewer={setViewer} setSel={setSel} sel={sel} actionsFor={actionsFor} plabel={plabel} />}
+      {fx > 0 && <div key={fx} className="dmgflash" />}
 
       {game.winner != null && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(4,7,12,.82)", zIndex: 60, display: "grid", placeItems: "center" }}>
