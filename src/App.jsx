@@ -1819,8 +1819,8 @@ function EngineBeta({ main }) {
       "Download EDOPro card database (cards.cdb ~7.4 MB)",
       "Query a card to prove the cardReader source works",
       "Fetch a Lua card script (scriptReader source)",
-      "Load the ocgcore / EDOPro WASM engine",
-      "Read engine version (OCG_GetVersion)",
+      "Load the ocgcore / EDOPro WASM engine (sync build)",
+      "Confirm the duel API (createDuel / process / …)",
     ];
     setSteps(plan.map((label) => ({ label, state: "pending", note: "" })));
     try {
@@ -1853,19 +1853,26 @@ function EngineBeta({ main }) {
       const scText = sc.ok ? await sc.text() : "";
       set(3, { state: sc.ok ? "ok" : "warn", note: sc.ok ? `c${testId}.lua (${scText.length} bytes)` : `no script for #${testId} (normal monster?)` });
 
-      // 5. engine wasm
+      // 5. engine wasm — use the SYNC build (browser-safe; the default async
+      //    build needs experimental JSPI stack-switching). Try bundle first.
       set(4, { state: "run" });
-      const coreMod = await import(/* @vite-ignore */ ENGINE.core);
-      const createCore = coreMod.createCore || coreMod.default?.createCore;
-      if (typeof createCore !== "function") throw new Error("createCore export not found on package");
-      const core = await createCore();
-      set(4, { state: "ok", note: "WASM instantiated" });
+      const candidates = [ENGINE.core + "?bundle", ENGINE.core];
+      let coreMod = null, usedUrl = "", lastErr = "";
+      for (const url of candidates) {
+        try { coreMod = await import(/* @vite-ignore */ url); usedUrl = url; break; }
+        catch (e) { lastErr = String(e?.message || e); }
+      }
+      if (!coreMod) throw new Error("engine import failed — " + lastErr);
+      const createCore = coreMod.createCore || coreMod.default?.createCore || coreMod.default;
+      if (typeof createCore !== "function") throw new Error("createCore not exported. keys: " + Object.keys(coreMod).slice(0, 14).join(","));
+      const core = await createCore({ sync: true });
+      window.__ocg = core;
+      set(4, { state: "ok", note: `engine ready (${usedUrl.includes("bundle") ? "bundled" : "esm"})` });
 
-      // 6. version
+      // 6. confirm the duel API is present
       set(5, { state: "run" });
-      let vTxt = "loaded";
-      try { const v = core.getVersion?.() || core.OCG_GetVersion?.(); if (v) vTxt = JSON.stringify(v); } catch {}
-      set(5, { state: "ok", note: vTxt });
+      const methods = ["createDuel", "startDuel", "duelProcess", "duelGetMessage", "duelSetResponse"].filter((m) => typeof core[m] === "function");
+      set(5, { state: methods.length >= 4 ? "ok" : "warn", note: methods.length ? `API: ${methods.join(", ")}` : "no duel methods found on core" });
     } catch (e) {
       setSteps((s) => { const i = s.findIndex((x) => x.state === "run"); return s.map((x, j) => (j === i ? { ...x, state: "fail", note: String(e.message || e) } : x)); });
     }
