@@ -302,7 +302,11 @@ export default function App() {
         @keyframes rise{from{background-position:0 0}to{background-position:0 -420px}}
         @keyframes glowpulse{0%,100%{opacity:.72}50%{opacity:1}}
         @keyframes riftglow{0%,100%{opacity:.75;filter:drop-shadow(0 0 3px rgba(138,107,255,.5))}50%{opacity:1;filter:drop-shadow(0 0 12px rgba(138,107,255,.95))}}
-        @media (prefers-reduced-motion:reduce){.cardimg,.dcard,.lpnum,.turnbanner,.dmgflash,.shake,.atktarget,.fieldbg,.emberlayer,.motelayer,.rift{animation:none;transition:none}}
+        .flarelayer{position:absolute;inset:0;pointer-events:none;z-index:3}
+        .flare-red{background:radial-gradient(circle at 50% 40%,transparent 35%,rgba(226,60,40,.6));animation:flarefade .6s ease forwards}
+        .flare-gold{background:radial-gradient(120% 70% at 50% 100%,rgba(240,210,110,.55),transparent 62%);animation:flarefade .75s ease forwards}
+        @keyframes flarefade{0%{opacity:0}22%{opacity:1}100%{opacity:0}}
+        @media (prefers-reduced-motion:reduce){.cardimg,.dcard,.lpnum,.turnbanner,.dmgflash,.shake,.atktarget,.fieldbg,.emberlayer,.motelayer,.rift,.flare-red,.flare-gold{animation:none;transition:none}}
       `}</style>
 
       {/* header */}
@@ -2099,7 +2103,12 @@ function EngineDuel({ main, extra }) {
   const [pick, setPick] = useState([]);          // multi-select buffer for SELECT_CARD
   const [log, setLog] = useState([]);
   const [diag, setDiag] = useState(false);
-  const core = useRef(null), handle = useRef(null), mod = useRef(null), db = useRef(null);
+  const [flare, setFlare] = useState(null); // {kind,n} reactive arena flash
+  const [shaking, setShaking] = useState(false);
+  const core = useRef(null), handle = useRef(null), mod = useRef(null), db = useRef(null), fxN = useRef(0);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const doFlare = (kind) => { fxN.current += 1; setFlare({ kind, n: fxN.current }); };
+  const doShake = () => { setShaking(true); setTimeout(() => setShaking(false), 420); };
 
   const logLine = (s) => setLog((l) => [...l.slice(-160), s]);
   const nameOf = (code) => {
@@ -2165,31 +2174,39 @@ function EngineDuel({ main, extra }) {
     return out.length ? out : [{ player: m.player, location: L.MZONE, sequence: 0 }];
   };
 
-  const drive = () => {
+  const drive = async () => {
     const c = core.current, h = handle.current, m = mod.current;
     const MT = m.OcgMessageType, PR = m.OcgProcessResult, RT = m.OcgResponseType, IA = m.SelectIdleCMDAction, BA = m.SelectBattleCMDAction;
     let guard = 0;
     while (guard++ < 6000) {
       const st = c.duelProcess(h);
       const msgs = c.duelGetMessage(h) || [];
+      let shown = false, fxRed = false, fxGold = false, fxShake = false;
       for (const msg of msgs) {
         if (msg.type === MT.HINT) continue;
         const nm = (m.ocgMessageTypeStrings?.get?.(msg.type)) || `msg#${msg.type}`;
-        if ([MT.DRAW, MT.SUMMONING, MT.SPSUMMONING, MT.MOVE, MT.CHAINING, MT.SET, MT.FLIPSUMMONING, MT.ATTACK, MT.DAMAGE, MT.RECOVER, MT.NEW_TURN, MT.NEW_PHASE].includes(msg.type))
-          logLine("• " + nm.toLowerCase().replace(/_/g, " "));
+        if ([MT.DRAW, MT.SUMMONING, MT.SPSUMMONING, MT.MOVE, MT.CHAINING, MT.SET, MT.FLIPSUMMONING, MT.ATTACK, MT.DAMAGE, MT.RECOVER, MT.NEW_TURN, MT.NEW_PHASE].includes(msg.type)) {
+          logLine("• " + nm.toLowerCase().replace(/_/g, " ")); shown = true;
+        }
+        if (msg.type === MT.DAMAGE) { fxRed = true; fxShake = true; }
+        else if (msg.type === MT.ATTACK) fxShake = true;
+        else if ([MT.SUMMONING, MT.SPSUMMONING, MT.FLIPSUMMONING].includes(msg.type)) fxGold = true;
       }
       readBoard();
+      if (fxRed) doFlare("red"); else if (fxGold) doFlare("gold");
+      if (fxShake) doShake();
       if (st === PR.END) { setStatus("ended"); setPrompt(null); return; }
       if (st === PR.WAITING) {
         const sel = [...msgs].reverse().find((x) => isSelect(x, MT));
         if (!sel) return;
-        if (sel.player !== 0) { c.duelSetResponse(h, oppResponse(sel, RT, IA, BA, MT)); continue; } // AI opponent
+        if (sel.player !== 0) { c.duelSetResponse(h, oppResponse(sel, RT, IA, BA, MT)); await sleep(260); continue; } // AI opponent, paced
         // human selects we don't render a UI for yet → resolve minimally so it never stalls
         if ([MT.SELECT_SUM, MT.SELECT_UNSELECT_CARD, MT.SELECT_COUNTER, MT.SELECT_DISFIELD].includes(sel.type)) {
           c.duelSetResponse(h, autoResponse(sel, RT, IA, BA, MT)); logLine("· auto-resolved a complex selection"); continue;
         }
         setPick([]); setPrompt(sel); return; // hand off to the human
       }
+      if (shown) await sleep(150); // let the animation/flare breathe
       // CONTINUE → keep processing
     }
   };
@@ -2287,16 +2304,16 @@ function EngineDuel({ main, extra }) {
   if (status === "idle" || status === "loading" || status === "error") return (
     <div style={{ height: "calc(100vh - 60px)", display: "grid", placeItems: "center", padding: 24 }}>
       <div style={{ textAlign: "center", maxWidth: 520 }}>
-        <p className="disp" style={{ color: C.gold, fontSize: 18 }}>Auto-Duel · Full Engine (ocgcore)</p>
+        <p className="disp" style={{ color: C.gold, fontSize: 18 }}>Duel</p>
         <p style={{ color: C.mute, fontSize: 13, lineHeight: 1.6, margin: "10px 0 18px" }}>
           Plays under the real, current Master Rules with the EDOPro engine — card effects resolve
           automatically, draws and summons are enforced, no manual moves. You only answer the engine's
-          prompts. Loads your deck ({main.length} main / {extra.length} extra) on both sides; the
-          opponent auto-passes for now (a full AI is next). First load fetches the engine + card database.
+          prompts. Loads your deck ({main.length} main / {extra.length} extra) on both sides and you
+          face a basic AI opponent. First load fetches the engine + card database.
         </p>
         {status === "error" && <p className="mono" style={{ color: C.bad, fontSize: 12, marginBottom: 14, wordBreak: "break-word" }}>❌ {err}</p>}
         <button onClick={start} disabled={status === "loading"} className="disp" style={{ ...btn(), background: C.gold, color: "#1a1206", border: "none", padding: "12px 30px", fontSize: 14, opacity: status === "loading" ? 0.6 : 1 }}>
-          {status === "loading" ? "Loading engine…" : "Start Auto-Duel"}
+          {status === "loading" ? "Loading engine…" : "Start Duel"}
         </button>
         <div style={{ marginTop: 16 }}>
           <button onClick={() => setDiag((d) => !d)} style={{ ...miniBar(), fontSize: 10 }}>{diag ? "hide" : "show"} engine diagnostics</button>
@@ -2357,8 +2374,9 @@ function EngineDuel({ main, extra }) {
         <div className="fieldbg heaven" />
         <div className="emberlayer" />
         <div className="motelayer" />
+        {flare && <div key={flare.n} className={"flarelayer " + (flare.kind === "red" ? "flare-red" : "flare-gold")} />}
         {b && (
-          <div style={{ position: "relative", zIndex: 1, maxWidth: 900, width: "100%", margin: "0 auto", borderRadius: 16, padding: "16px 22px", display: "flex", flexDirection: "column", gap: 8,
+          <div className={shaking ? "shake" : undefined} style={{ position: "relative", zIndex: 1, maxWidth: 900, width: "100%", margin: "0 auto", borderRadius: 16, padding: "16px 22px", display: "flex", flexDirection: "column", gap: 8,
             background: `radial-gradient(70% 55% at 50% 0%, ${hexA("#e24a28", 0.12)}, transparent 60%), radial-gradient(70% 55% at 50% 100%, ${hexA("#e8c25a", 0.12)}, transparent 60%), linear-gradient(180deg, rgba(20,10,14,.82), rgba(8,8,14,.72) 50%, rgba(18,15,8,.82))`,
             border: `1px solid ${hexA(C.gold, 0.25)}`, boxShadow: `inset 0 0 90px rgba(0,0,0,.66), 0 0 40px rgba(0,0,0,.5)`, backdropFilter: "blur(1px)" }}>
             {/* opponent */}
