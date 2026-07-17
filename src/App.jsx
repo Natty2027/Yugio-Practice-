@@ -2181,6 +2181,23 @@ function EngineDuel({ main, extra }) {
       });
       if (!h) throw new Error("createDuel returned null");
       handle.current = h;
+      // preload the shared Lua libraries every card script depends on (GetID, aux,
+      // constants, and the Fusion/Synchro/Xyz/Link/etc. summon procedures)
+      logLine("loading rules libraries…");
+      const BASE = [
+        "constant.lua", "archetype_setcode_constants.lua", "card_counter_constants.lua",
+        "utility.lua", "cards_specific_functions.lua", "chain.lua", "deprecated_functions.lua",
+        "proc_normal.lua", "proc_equip.lua", "proc_fusion.lua", "proc_fusion_spell.lua", "proc_ritual.lua",
+        "proc_synchro.lua", "proc_xyz.lua", "proc_link.lua", "proc_pendulum.lua", "proc_gemini.lua",
+        "proc_spirit.lua", "proc_union.lua", "proc_maximum.lua", "proc_persistent.lua", "proc_workaround.lua",
+      ];
+      let libFail = 0;
+      for (const nm of BASE) {
+        const t = syncScript(nm);
+        if (!t) { libFail++; continue; }
+        try { c.loadScript(h, nm, t); } catch (e) { libFail++; logLine("⚠ lib " + nm + ": " + (e?.message || e)); }
+      }
+      logLine(`rules libraries loaded (${BASE.length - libFail}/${BASE.length}).`);
       const add = (team, list, location) => list.forEach((cd) => c.duelNewCard(h, { team, duelist: 0, code: Number(cd.id), controller: team, location, sequence: 2, position: POS?.FACEDOWN_DEFENSE ?? 8 }));
       add(0, main, L.DECK); add(0, extra, L.EXTRA); add(1, main, L.DECK); add(1, extra, L.EXTRA);
       c.startDuel(h);
@@ -2251,41 +2268,74 @@ function EngineDuel({ main, extra }) {
     </div>
   );
 
-  const Zone = ({ card, faceDown }) => (
-    <div style={{ width: 50, height: 73, borderRadius: 5, border: `1px solid ${C.line}`, background: C.panel2, overflow: "hidden", position: "relative", flexShrink: 0 }}>
+  const Zone = ({ card, faceDown, tone = ZONE.mon }) => (
+    <div style={{ width: 50, height: 73, borderRadius: 6, border: `1.5px solid ${card ? shade(tone, -6) : hexA(tone, 0.4)}`, overflow: "hidden", position: "relative", flexShrink: 0,
+      background: card ? C.panel2 : `radial-gradient(120% 120% at 50% 35%, ${hexA(tone, 0.14)}, rgba(4,7,12,.5))`,
+      boxShadow: card ? "none" : `inset 0 0 10px ${hexA(tone, 0.18)}` }}>
       {card ? (faceDown || (card.position & 10)
-        ? <div style={{ width: "100%", height: "100%", background: `repeating-linear-gradient(45deg,${shade(C.gold, -30)} 0 4px,#14100a 4px 8px)` }} />
+        ? <div style={{ width: "100%", height: "100%", background: `repeating-linear-gradient(45deg,${shade(C.gold, -30)} 0 4px,#14100a 4px 8px)`, display: "grid", placeItems: "center" }}><div style={{ width: "38%", height: "38%", transform: "rotate(45deg)", background: `linear-gradient(${C.gold},${C.goldDim})`, borderRadius: 3, opacity: .85 }} /></div>
         : <><CardImg id={card.code} variant="small" name={nameOf(card.code)} style={{ width: "100%", height: "100%", objectFit: "cover", transform: (card.position & 4) ? "rotate(90deg) scale(.8)" : "none" }} />
           {card.attack != null && <span className="mono" style={{ position: "absolute", bottom: 0, left: 0, right: 0, fontSize: 7.5, textAlign: "center", background: "rgba(0,0,0,.6)", color: "#fff" }}>{card.attack}/{card.defense ?? "—"}</span>}</>)
-        : <span className="mono" style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 8, color: C.mute }} />}
+        : null}
     </div>
   );
-  const zonesRow = (arr, n) => Array.from({ length: n }, (_, i) => <Zone key={i} card={arr[i]} />);
   const b = board;
   const btns = prompt ? promptButtons() : [];
 
+  const lpBar = (s, label, active) => {
+    const pct = Math.max(0, Math.min(100, (s.lp / 8000) * 100));
+    const col = s.lp > 4000 ? C.good : s.lp > 1500 ? C.gold : C.bad;
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 8px", borderRadius: 8, background: "rgba(0,0,0,.3)", border: `1px solid ${C.line}` }}>
+        <div className="disp" style={{ width: 30, height: 30, borderRadius: "50%", display: "grid", placeItems: "center", fontSize: 11, color: "#0b0e1a", background: `radial-gradient(circle at 35% 30%, ${shade(col, 40)}, ${shade(col, -30)})` }}>{label}</div>
+        <div style={{ flex: 1, minWidth: 100 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <span className="mono" style={{ fontSize: 8.5, color: C.mute, letterSpacing: ".14em" }}>LP</span>
+            <span key={s.lp} className="mono lpnum" style={{ fontSize: 16, fontWeight: 700, color: col }}>{s.lp}</span>
+          </div>
+          <div style={{ height: 6, borderRadius: 4, background: "rgba(0,0,0,.5)", overflow: "hidden", marginTop: 2, border: `1px solid ${hexA(col, 0.3)}` }}>
+            <div style={{ width: `${pct}%`, height: "100%", background: `linear-gradient(90deg,${shade(col, -20)},${col})`, transition: "width .45s" }} />
+          </div>
+        </div>
+        <span className="mono" style={{ fontSize: 8.5, color: C.mute, whiteSpace: "nowrap" }}>deck {s.deck} · GY {s.grave} · EX {s.extra}</span>
+      </div>
+    );
+  };
+  const row = (arr, tone) => (
+    <div style={{ display: "flex", gap: 5, justifyContent: "center" }}>
+      {Array.from({ length: 5 }, (_, i) => <Zone key={i} card={arr[i]} tone={tone} />)}
+    </div>
+  );
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", height: "calc(100vh - 60px)" }}>
-      <div style={{ overflow: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 10, background: `linear-gradient(180deg,#0e1424,#0a0f1b)` }}>
-        {b && [["opp", "Player 2 (opponent)", C.bad], ["me", "Player 1 (you)", C.good]].map(([k, label, col]) => {
-          const s = b[k];
-          return (
-            <div key={k} style={{ border: `1px solid ${C.line}`, borderRadius: 10, padding: 10, background: "rgba(0,0,0,.25)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-                <span className="disp" style={{ fontSize: 12, color: col }}>{label}</span>
-                <span className="mono lpnum" key={s.lp} style={{ fontSize: 18, fontWeight: 700, color: s.lp > 4000 ? C.good : s.lp > 1500 ? C.gold : C.bad }}>LP {s.lp}</span>
-                <span className="mono" style={{ fontSize: 10, color: C.mute, marginLeft: "auto" }}>hand {s.hand.length} · deck {s.deck} · GY {s.grave} · extra {s.extra}</span>
-              </div>
-              <div style={{ display: "flex", gap: 5, marginBottom: 5 }}>{zonesRow(s.mon, 5)}</div>
-              <div style={{ display: "flex", gap: 5 }}>{zonesRow(s.st, 5)}</div>
-              {k === "me" && (
-                <div style={{ display: "flex", gap: 4, marginTop: 8, flexWrap: "wrap" }}>
-                  {s.hand.map((c, i) => <Zone key={i} card={c} />)}
-                </div>
-              )}
+      <div style={{ overflow: "auto", padding: 14, display: "flex", flexDirection: "column", justifyContent: "center", background: "#0a0f1b" }}>
+        {b && (
+          <div style={{ maxWidth: 560, width: "100%", margin: "0 auto", borderRadius: 14, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6,
+            background: `radial-gradient(70% 55% at 50% 0%, ${hexA(ZONE.st, 0.1)}, transparent 62%), radial-gradient(70% 55% at 50% 100%, ${hexA(ZONE.mon, 0.09)}, transparent 62%), linear-gradient(180deg,#0e1424,#0a0f1b 50%,#0e1424)`,
+            border: `1px solid ${C.line}`, boxShadow: "inset 0 0 80px rgba(0,0,0,.62)" }}>
+            {/* opponent */}
+            {lpBar(b.opp, "P2", false)}
+            {/* opponent hand (backs) */}
+            <div style={{ display: "flex", gap: 3, justifyContent: "center", minHeight: 20 }}>
+              {Array.from({ length: b.opp.hand.length }, (_, i) => <div key={i} style={{ width: 26, height: 18, borderRadius: 3, background: `repeating-linear-gradient(45deg,${shade(C.gold, -30)} 0 3px,#14100a 3px 6px)`, border: `1px solid ${C.line}` }} />)}
             </div>
-          );
-        })}
+            {row(b.opp.st, ZONE.st)}
+            {row(b.opp.mon, ZONE.mon)}
+            <div style={{ borderTop: `1px solid ${hexA(ZONE.emz, 0.35)}`, margin: "2px 0", textAlign: "center" }}>
+              <span className="mono" style={{ fontSize: 8, color: hexA(ZONE.emz, 0.8), letterSpacing: ".18em" }}>◆ FIELD ◆</span>
+            </div>
+            {row(b.me.mon, ZONE.mon)}
+            {row(b.me.st, ZONE.st)}
+            {/* your hand */}
+            <div style={{ display: "flex", gap: 4, justifyContent: "center", flexWrap: "wrap", minHeight: 74, padding: "4px 0" }}>
+              {b.me.hand.map((c, i) => <Zone key={i} card={c} tone={ZONE.mon} />)}
+              {b.me.hand.length === 0 && <span className="mono" style={{ fontSize: 10, color: C.mute, alignSelf: "center" }}>empty hand</span>}
+            </div>
+            {lpBar(b.me, "P1", true)}
+          </div>
+        )}
+        {!b && <p className="mono" style={{ color: C.mute, fontSize: 12, textAlign: "center" }}>setting up field…</p>}
       </div>
 
       {/* right: prompt + log */}
