@@ -290,7 +290,19 @@ export default function App() {
         @keyframes dmgflash{0%{opacity:0}22%{opacity:1}100%{opacity:0}}
         @keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-5px)}40%{transform:translateX(5px)}60%{transform:translateX(-3px)}80%{transform:translateX(3px)}}
         .atktarget{animation:attackPulse 1.1s infinite}
-        @media (prefers-reduced-motion:reduce){.cardimg,.dcard,.lpnum,.turnbanner,.dmgflash,.shake,.atktarget{animation:none;transition:none}}
+        /* heaven / hell arena backdrop */
+        .fieldwrap{position:relative;overflow:auto;background:radial-gradient(120% 80% at 50% 50%,#0c0a12,#060509)}
+        .fieldbg{position:absolute;inset:0;pointer-events:none}
+        .fieldbg.hell{background:radial-gradient(75% 46% at 50% -10%,rgba(226,74,40,.34),transparent 66%),radial-gradient(38% 24% at 28% 6%,rgba(255,120,40,.16),transparent 70%);animation:glowpulse 6s ease-in-out infinite}
+        .fieldbg.heaven{background:radial-gradient(75% 46% at 50% 110%,rgba(240,212,112,.26),transparent 66%),radial-gradient(38% 24% at 72% 94%,rgba(255,255,222,.13),transparent 70%);animation:glowpulse 7.5s ease-in-out infinite}
+        .emberlayer,.motelayer{position:absolute;inset:0;pointer-events:none;background-repeat:repeat}
+        .emberlayer{opacity:.6;background-image:radial-gradient(2px 2px at 15% 80%,#ff9a4d,transparent),radial-gradient(1.5px 1.5px at 45% 92%,#ffbe6a,transparent),radial-gradient(2px 2px at 76% 85%,#ff7a3d,transparent),radial-gradient(1px 1px at 60% 96%,#ffd27a,transparent),radial-gradient(1.5px 1.5px at 32% 70%,#ff8a45,transparent),radial-gradient(1px 1px at 88% 74%,#ffab55,transparent);background-size:420px 420px;animation:rise 15s linear infinite}
+        .motelayer{opacity:.5;background-image:radial-gradient(1.5px 1.5px at 25% 20%,#fff6d8,transparent),radial-gradient(1px 1px at 65% 35%,#ffe9a8,transparent),radial-gradient(2px 2px at 82% 14%,#fffbe8,transparent),radial-gradient(1px 1px at 40% 8%,#ffe08a,transparent),radial-gradient(1.5px 1.5px at 12% 40%,#fff4cf,transparent);background-size:540px 540px;animation:rise 27s linear infinite}
+        .rift{animation:riftglow 4s ease-in-out infinite}
+        @keyframes rise{from{background-position:0 0}to{background-position:0 -420px}}
+        @keyframes glowpulse{0%,100%{opacity:.72}50%{opacity:1}}
+        @keyframes riftglow{0%,100%{opacity:.75;filter:drop-shadow(0 0 3px rgba(138,107,255,.5))}50%{opacity:1;filter:drop-shadow(0 0 12px rgba(138,107,255,.95))}}
+        @media (prefers-reduced-motion:reduce){.cardimg,.dcard,.lpnum,.turnbanner,.dmgflash,.shake,.atktarget,.fieldbg,.emberlayer,.motelayer,.rift{animation:none;transition:none}}
       `}</style>
 
       {/* header */}
@@ -2340,11 +2352,15 @@ function EngineDuel({ main, extra }) {
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", height: "calc(100vh - 60px)" }}>
-      <div style={{ overflow: "auto", padding: 16, display: "flex", flexDirection: "column", justifyContent: "center", background: "#0a0f1b" }}>
+      <div className="fieldwrap" style={{ padding: 16, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+        <div className="fieldbg hell" />
+        <div className="fieldbg heaven" />
+        <div className="emberlayer" />
+        <div className="motelayer" />
         {b && (
-          <div style={{ maxWidth: 900, width: "100%", margin: "0 auto", borderRadius: 16, padding: "16px 22px", display: "flex", flexDirection: "column", gap: 8,
-            background: `radial-gradient(70% 55% at 50% 0%, ${hexA(ZONE.st, 0.1)}, transparent 62%), radial-gradient(70% 55% at 50% 100%, ${hexA(ZONE.mon, 0.09)}, transparent 62%), linear-gradient(180deg,#0e1424,#0a0f1b 50%,#0e1424)`,
-            border: `1px solid ${C.line}`, boxShadow: "inset 0 0 80px rgba(0,0,0,.62)" }}>
+          <div style={{ position: "relative", zIndex: 1, maxWidth: 900, width: "100%", margin: "0 auto", borderRadius: 16, padding: "16px 22px", display: "flex", flexDirection: "column", gap: 8,
+            background: `radial-gradient(70% 55% at 50% 0%, ${hexA("#e24a28", 0.12)}, transparent 60%), radial-gradient(70% 55% at 50% 100%, ${hexA("#e8c25a", 0.12)}, transparent 60%), linear-gradient(180deg, rgba(20,10,14,.82), rgba(8,8,14,.72) 50%, rgba(18,15,8,.82))`,
+            border: `1px solid ${hexA(C.gold, 0.25)}`, boxShadow: `inset 0 0 90px rgba(0,0,0,.66), 0 0 40px rgba(0,0,0,.5)`, backdropFilter: "blur(1px)" }}>
             {/* opponent */}
             {lpBar(b.opp, "P2", false)}
             {/* opponent hand (backs) */}
@@ -2353,8 +2369,8 @@ function EngineDuel({ main, extra }) {
             </div>
             {row(b.opp.st, ZONE.st)}
             {row(b.opp.mon, ZONE.mon)}
-            <div style={{ borderTop: `1px solid ${hexA(ZONE.emz, 0.35)}`, margin: "2px 0", textAlign: "center" }}>
-              <span className="mono" style={{ fontSize: 8, color: hexA(ZONE.emz, 0.8), letterSpacing: ".18em" }}>◆ FIELD ◆</span>
+            <div className="rift" style={{ margin: "3px 0", textAlign: "center", height: 2, background: `linear-gradient(90deg, transparent, ${hexA(ZONE.emz, 0.9)}, ${hexA(C.gold, 0.6)}, ${hexA(ZONE.emz, 0.9)}, transparent)`, position: "relative" }}>
+              <span className="mono" style={{ position: "absolute", top: -8, left: "50%", transform: "translateX(-50%)", fontSize: 8, color: hexA(ZONE.emz, 0.95), letterSpacing: ".22em", background: "rgba(8,8,14,.85)", padding: "0 6px" }}>◆ FIELD ◆</span>
             </div>
             {row(b.me.mon, ZONE.mon)}
             {row(b.me.st, ZONE.st)}
@@ -2366,7 +2382,7 @@ function EngineDuel({ main, extra }) {
             {lpBar(b.me, "P1", true)}
           </div>
         )}
-        {!b && <p className="mono" style={{ color: C.mute, fontSize: 12, textAlign: "center" }}>setting up field…</p>}
+        {!b && <p className="mono" style={{ position: "relative", zIndex: 1, color: C.mute, fontSize: 12, textAlign: "center" }}>setting up field…</p>}
       </div>
 
       {/* right: prompt + log */}
