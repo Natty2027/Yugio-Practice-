@@ -302,6 +302,67 @@ export default function App() {
         @keyframes rise{from{background-position:0 0}to{background-position:0 -420px}}
         @keyframes glowpulse{0%,100%{opacity:.72}50%{opacity:1}}
         @keyframes riftglow{0%,100%{opacity:.75;filter:drop-shadow(0 0 3px rgba(138,107,255,.5))}50%{opacity:1;filter:drop-shadow(0 0 12px rgba(138,107,255,.95))}}
+        /* ---- Master Duel arena (modeled on the MD forest-ruins field) ---- */
+        .mdArena{position:relative;border-radius:12px;overflow:hidden;
+          background:
+            radial-gradient(60% 90% at -5% 50%, rgba(24,52,22,.95), transparent 55%),
+            radial-gradient(60% 90% at 105% 50%, rgba(22,48,20,.95), transparent 55%),
+            radial-gradient(90% 55% at 50% -8%, rgba(30,58,24,.9), transparent 55%),
+            radial-gradient(90% 55% at 50% 108%, rgba(28,54,22,.9), transparent 55%),
+            linear-gradient(180deg,#4a5238 0%,#565d40 30%,#5b6144 55%,#4e5439 100%)}
+        .mdArena::before{content:"";position:absolute;inset:0;pointer-events:none;opacity:.5;
+          background-image:radial-gradient(3px 3px at 12% 24%,rgba(20,40,16,.7),transparent),radial-gradient(4px 3px at 88% 18%,rgba(22,44,18,.7),transparent),radial-gradient(3px 4px at 8% 78%,rgba(18,38,14,.7),transparent),radial-gradient(4px 4px at 92% 82%,rgba(20,42,16,.7),transparent),radial-gradient(2px 2px at 30% 8%,rgba(160,168,120,.35),transparent),radial-gradient(2px 2px at 66% 92%,rgba(158,166,118,.3),transparent);
+          background-size:340px 300px}
+        .mdField{position:relative;border-radius:10px;padding:14px 18px;
+          background:
+            repeating-linear-gradient(0deg, rgba(60,66,46,.28) 0 1px, transparent 1px 52px),
+            repeating-linear-gradient(90deg, rgba(60,66,46,.28) 0 1px, transparent 1px 64px),
+            radial-gradient(80% 60% at 50% 50%, rgba(205,200,170,.16), transparent 75%),
+            linear-gradient(180deg,#8d8a6d 0%, #97927a 40%, #8f8b70 100%);
+          box-shadow: inset 0 0 60px rgba(40,44,26,.55), inset 0 0 6px rgba(0,0,0,.35), 0 4px 24px rgba(0,0,0,.45);
+          border:1px solid rgba(58,62,40,.8)}
+        .octpad{clip-path:polygon(29% 0,71% 0,100% 29%,100% 71%,71% 100%,29% 100%,0 71%,0 29%)}
+        .stonepad{position:relative;
+          background:
+            radial-gradient(78% 78% at 50% 46%, rgba(214,208,180,.9) 0 38%, rgba(178,172,142,.9) 39% 58%, rgba(196,190,160,.9) 59% 78%, rgba(160,155,126,.92) 79% 100%),
+            linear-gradient(180deg,#b7b190,#a09a78)}
+        .stonepad::after{content:"";position:absolute;inset:14%;clip-path:polygon(29% 0,71% 0,100% 29%,100% 71%,71% 100%,29% 100%,0 71%,0 29%);
+          border:1px solid rgba(96,92,66,.55);opacity:.8}
+        .bluerow{position:relative}
+        .bluerow::before{content:"";position:absolute;left:-8px;right:-8px;top:-6px;bottom:-10px;pointer-events:none;border-radius:8px;
+          background:radial-gradient(70% 120% at 50% 115%, rgba(64,170,255,.34), transparent 62%);
+          box-shadow:0 10px 26px -8px rgba(64,170,255,.5);animation:glowpulse 3.6s ease-in-out infinite}
+        .redrow{position:relative}
+        .redrow::before{content:"";position:absolute;left:-8px;right:-8px;top:-10px;bottom:-6px;pointer-events:none;border-radius:8px;
+          background:radial-gradient(70% 120% at 50% -15%, rgba(255,96,130,.26), transparent 62%)}
+        .turnchange{position:absolute;left:0;right:0;top:42%;height:62px;z-index:34;display:grid;place-items:center;pointer-events:none;
+          background:linear-gradient(180deg, rgba(70,120,230,0) 0%, rgba(38,84,200,.94) 26%, rgba(30,70,185,.96) 74%, rgba(70,120,230,0) 100%);
+          box-shadow:0 0 30px rgba(40,90,210,.55);animation:tcSweep 1.7s cubic-bezier(.2,.8,.25,1) forwards}
+        .turnchange span{font-style:italic;font-weight:800;letter-spacing:.26em;font-size:30px;color:#f2f6ff;
+          text-shadow:0 2px 0 rgba(10,26,80,.9), 0 0 18px rgba(140,180,255,.8);text-transform:uppercase}
+        @keyframes tcSweep{0%{transform:translateX(-102%)}16%{transform:translateX(0)}78%{transform:translateX(0);opacity:1}100%{transform:translateX(4%);opacity:0}}
+        .mdBand{background:linear-gradient(90deg, rgba(8,10,14,0) 0%, rgba(8,10,14,.78) 12%, rgba(8,10,14,.78) 88%, rgba(8,10,14,0) 100%);
+          color:#f4f2ea;font-weight:700;text-align:center;text-shadow:0 1px 3px rgba(0,0,0,.9);padding:7px 24px;font-size:12.5px;line-height:1.45}
+        .turnhex{clip-path:polygon(25% 5%,75% 5%,100% 50%,75% 95%,25% 95%,0 50%);width:74px;height:60px;display:grid;place-items:center;
+          background:radial-gradient(circle at 40% 30%, #d8433a, #8e1f1a 62%, #5c120e);box-shadow:inset 0 0 12px rgba(0,0,0,.55);
+          color:#ffd9a8;font-weight:800;font-size:11px;text-shadow:0 1px 2px #000;position:relative}
+        .turnhex::before{content:"";position:absolute;inset:3px;clip-path:polygon(25% 5%,75% 5%,100% 50%,75% 95%,25% 95%,0 50%);
+          border:0;background:linear-gradient(180deg, rgba(255,210,140,.35), transparent 45%);pointer-events:none}
+        .railbtn{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;cursor:pointer;font-size:18px;color:#dceafe;
+          background:radial-gradient(circle at 34% 28%, #2f6fd8, #123a86 62%, #0a2258);border:2px solid #6ea6f2;
+          box-shadow:0 0 10px rgba(46,110,220,.55), inset 0 2px 4px rgba(160,200,255,.4)}
+        .railbtn:hover{filter:brightness(1.18)}
+        .railbtn.off{filter:saturate(.35) brightness(.75)}
+        .lpplateOpp{position:absolute;top:10px;right:10px;z-index:20;display:flex;align-items:center;gap:8px}
+        .lpplateMe{position:absolute;bottom:10px;left:10px;z-index:20;display:flex;align-items:center;gap:8px}
+        .lpname{background:linear-gradient(90deg,#8e1f1a,#5c120e);color:#fff;font-size:10px;font-weight:700;padding:2px 10px;letter-spacing:.06em}
+        .lpnumplate{background:rgba(6,8,10,.88);color:#fff;font-weight:800;font-size:22px;padding:2px 14px;letter-spacing:.04em;
+          border:1px solid rgba(255,255,255,.12);text-shadow:0 0 8px rgba(255,255,255,.25)}
+        .avhex{clip-path:polygon(25% 5%,75% 5%,100% 50%,75% 95%,25% 95%,0 50%);width:44px;height:48px;display:grid;place-items:center;
+          background:radial-gradient(circle at 40% 30%, #b8362d, #6e1712);color:#ffe6c8;font-weight:800;font-size:12px;border:0}
+        .atkplate{color:#fff;font-weight:800;text-shadow:0 1px 0 #000, 0 0 6px rgba(0,0,0,.9);font-size:11px;line-height:1.15;text-align:center}
+        .atkplate .lv{color:#ffb63d;font-size:9px}
+        .atkplate u{text-decoration:none;border-top:1px solid rgba(255,255,255,.75);display:inline-block;padding-top:1px}
         .flarelayer{position:absolute;inset:0;pointer-events:none;z-index:3}
         .flare-red{background:radial-gradient(circle at 50% 40%,transparent 35%,rgba(226,60,40,.6));animation:flarefade .6s ease forwards}
         .flare-gold{background:radial-gradient(120% 70% at 50% 100%,rgba(240,210,110,.55),transparent 62%);animation:flarefade .75s ease forwards}
@@ -321,7 +382,7 @@ export default function App() {
           </div>
         </div>
         <nav style={{ display: "flex", gap: 4, marginLeft: 8 }}>
-          {[["editor", "Deck Editor"], ["duel", "Duel"], ["hand", "Test Hand"], ["stats", "Probability"]].map(([k, l]) => (
+          {[["editor", "Deck Editor"], ["duel", "Duel"], ["manual", "Manual Board"], ["hand", "Test Hand"], ["stats", "Probability"]].map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)} className="disp"
               style={{ fontSize: 12, padding: "8px 14px", borderRadius: 6, border: "none",
                 background: tab === k ? C.gold : "transparent",
@@ -345,6 +406,7 @@ export default function App() {
           addCard={addCard} removeOne={removeOne} countOf={countOf} flash={flash} />
       )}
       {tab === "duel" && <EngineDuel main={main} extra={extra} />}
+      {tab === "manual" && <DuelBoard main={main} extra={extra} />}
       {tab === "hand" && <HandTester main={main} />}
       {tab === "stats" && <Probability main={main} />}
 
@@ -1816,6 +1878,8 @@ const ENGINE = {
   cdb: "https://cdn.jsdelivr.net/gh/ProjectIgnis/BabelCDB@master/cards.cdb",
   script: (code) => `https://cdn.jsdelivr.net/gh/ProjectIgnis/CardScripts@master/official/c${code}.lua`,
 };
+/* fresh RNG seed per duel — a fixed seed deals the exact same hands every game */
+const rndSeed = () => Array.from({ length: 4 }, () => BigInt(1 + Math.floor(Math.random() * 0x7fffffff)));
 /* inject a UMD <script> once and resolve when it's loaded */
 const loadScript = (src) => new Promise((res, rej) => {
   if ([...document.scripts].some((s) => s.src === src)) return res();
@@ -1870,40 +1934,16 @@ function EngineBeta({ main, extra }) {
       const names = mod.ocgMessageTypeStrings;
       const core = await createCore({ sync: true });
 
-      const scriptCache = new Map();
-      const cardReader = (code) => {
-        const r = db.exec(`SELECT id,alias,CAST(setcode AS TEXT) sc,type,atk,def,level,CAST(race AS TEXT) rc,attribute FROM datas WHERE id=${code}`);
-        const v = r?.[0]?.values?.[0];
-        if (!v) return null;
-        const [id, alias, sc, type, atk, def, level, rc, attribute] = v;
-        const t = Number(type) >>> 0;
-        const isLink = !!(t & 0x4000000);
-        const lv = Number(level) >>> 0;
-        const setBig = BigInt(sc || "0");
-        const setcodes = [];
-        for (let i = 0n; i < 4n; i++) { const s = Number((setBig >> (16n * i)) & 0xffffn); if (s) setcodes.push(s); }
-        return {
-          code: Number(id), alias: Number(alias) || 0, setcodes, type: t,
-          level: lv & 0xff, attribute: Number(attribute) || 0, race: BigInt(rc || "0"),
-          attack: Number(atk) || 0, defense: isLink ? 0 : (Number(def) || 0),
-          lscale: (lv >> 24) & 0xff, rscale: (lv >> 16) & 0xff, link_marker: isLink ? (Number(def) || 0) : 0,
-        };
-      };
-      const scriptBase = "https://cdn.jsdelivr.net/gh/ProjectIgnis/CardScripts@master/";
-      const scriptReader = async (name) => {
-        const file = String(name).split("/").pop();
-        if (scriptCache.has(file)) return scriptCache.get(file);
-        const url = /^c\d+\.lua$/.test(file) ? scriptBase + "official/" + file : scriptBase + file;
-        const res = await fetch(url);
-        const txt = res.ok ? await res.text() : null;
-        scriptCache.set(file, txt);
-        return txt;
-      };
+      // the SYNC core calls these readers synchronously from inside the WASM —
+      // an async scriptReader hands it a Promise instead of Lua source and every
+      // card script silently fails. Use the shared synchronous readers.
+      const cardReader = makeCardReader(db);
+      const scriptReader = syncScript;
 
       log("Creating duel…");
       const handle = await core.createDuel({
         flags: MODE.MODE_MR5 ?? 0n,
-        seed: [1n, 2n, 3n, 4n],
+        seed: rndSeed(),
         team1: { startingLP: 8000, startingDrawCount: 5, drawCountPerTurn: 1 },
         team2: { startingLP: 8000, startingDrawCount: 5, drawCountPerTurn: 1 },
         cardReader, scriptReader,
@@ -2108,7 +2148,12 @@ function EngineDuel({ main, extra }) {
   const [flare, setFlare] = useState(null); // {kind,n} reactive arena flash
   const [shaking, setShaking] = useState(false);
   const [summonSpot, setSummonSpot] = useState(null); // {card,n} 3D pop-out on summon
+  const [turnInfo, setTurnInfo] = useState({ n: 0, player: 0, phase: "" }); // MD turn chip
+  const [turnFlash, setTurnFlash] = useState(0);       // triggers the TURN CHANGE banner
+  const [showBand, setShowBand] = useState(true);      // ⓘ — dark instruction band
+  const [arenaLog, setArenaLog] = useState(false);     // 🗒 — recent log overlaid on the arena
   const core = useRef(null), handle = useRef(null), mod = useRef(null), db = useRef(null), fxN = useRef(0);
+  const lastSel = useRef(null), turnRef = useRef(0);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const doFlare = (kind) => { fxN.current += 1; setFlare({ kind, n: fxN.current }); };
   const doShake = () => { setShaking(true); setTimeout(() => setShaking(false), 420); };
@@ -2132,11 +2177,25 @@ function EngineDuel({ main, extra }) {
   const readBoard = () => {
     const c = core.current, h = handle.current, m = mod.current;
     const L = m.OcgLocation, QF = m.OcgQueryFlags;
-    const flags = QF.CODE | QF.POSITION | QF.ATTACK | QF.DEFENSE;
-    const loc = (t, location) => (c.duelQueryLocation(h, { team: t, location, flags }) || []).filter(Boolean);
+    const flags = QF.CODE | QF.POSITION | QF.ATTACK | QF.DEFENSE | QF.LEVEL;
+    // NOTE: the query field is `controller` (not `team`) — passing `team` reads
+    // player 0 for both sides, which is why the opponent's board mirrored yours.
+    const loc = (t, location) => c.duelQueryLocation(h, { controller: t, location, flags }) || [];
     let lp = [8000, 8000];
     try { const f = c.duelQueryField(h); if (f?.players) lp = [f.players[0]?.lp ?? 8000, f.players[1]?.lp ?? 8000]; } catch {}
-    const side = (t) => ({ lp: lp[t], mon: loc(t, L.MZONE), st: loc(t, L.SZONE), hand: loc(t, L.HAND), grave: c.duelQueryCount(h, t, L.GRAVE), deck: c.duelQueryCount(h, t, L.DECK), extra: c.duelQueryCount(h, t, L.EXTRA) });
+    const side = (t) => {
+      const mz = loc(t, L.MZONE);   // 7 slots: 0–4 main monster zones, 5–6 the shared EMZs
+      const sz = loc(t, L.SZONE);   // 8 slots: 0–4 S/T, 5 field spell, 6–7 pendulum
+      return {
+        lp: lp[t],
+        mon: [0, 1, 2, 3, 4].map((i) => mz[i] || null),   // keep empty slots → cards stay in their real zones
+        emz: [mz[5] || null, mz[6] || null],
+        st: [0, 1, 2, 3, 4].map((i) => sz[i] || null),
+        fieldZone: sz[5] || null,
+        hand: loc(t, L.HAND).filter(Boolean),
+        grave: c.duelQueryCount(h, t, L.GRAVE), deck: c.duelQueryCount(h, t, L.DECK), extra: c.duelQueryCount(h, t, L.EXTRA),
+      };
+    };
     setBoard({ me: side(0), opp: side(1) });
   };
 
@@ -2204,6 +2263,7 @@ function EngineDuel({ main, extra }) {
     const MT = m.OcgMessageType, PR = m.OcgProcessResult, RT = m.OcgResponseType, IA = m.SelectIdleCMDAction, BA = m.SelectBattleCMDAction;
     // selections we resolve automatically for the human (no meaningful choice / no UI yet)
     const AUTO = [MT.SELECT_PLACE, MT.SELECT_SUM, MT.SELECT_UNSELECT_CARD, MT.SELECT_COUNTER, MT.SELECT_DISFIELD];
+    const PHNAME = { 0x01: "Draw", 0x02: "Standby", 0x04: "Main 1", 0x08: "Battle Start", 0x10: "Battle Step", 0x20: "Damage", 0x40: "Damage Calc", 0x80: "Battle", 0x100: "Main 2", 0x200: "End" };
     let guard = 0, autoStreak = 0;
     while (guard++ < 8000) {
       const st = c.duelProcess(h);
@@ -2215,20 +2275,23 @@ function EngineDuel({ main, extra }) {
         if ([MT.DRAW, MT.SUMMONING, MT.SPSUMMONING, MT.MOVE, MT.CHAINING, MT.SET, MT.FLIPSUMMONING, MT.ATTACK, MT.DAMAGE, MT.RECOVER, MT.NEW_TURN, MT.NEW_PHASE].includes(msg.type)) {
           logLine("• " + nm.toLowerCase().replace(/_/g, " ")); shown = true;
         }
+        if (msg.type === MT.NEW_TURN) { turnRef.current += 1; setTurnInfo((t) => ({ ...t, n: turnRef.current, player: msg.player })); fxN.current += 1; setTurnFlash(fxN.current); }
+        else if (msg.type === MT.NEW_PHASE) setTurnInfo((t) => ({ ...t, phase: PHNAME[msg.phase] || "" }));
         if (msg.type === MT.DAMAGE) { fxRed = true; fxShake = true; }
         else if (msg.type === MT.ATTACK) fxShake = true;
         else if ([MT.SUMMONING, MT.SPSUMMONING, MT.FLIPSUMMONING].includes(msg.type)) { fxGold = true; if (msg.code) summonCode = msg.code; }
+        if (isSelect(msg, MT)) lastSel.current = msg;  // remember across batches — the WAITING result can land a batch after its select message
       }
       readBoard();
-      if (fxRed) doFlare("red"); else if (fxGold) doFlare("gold");
-      if (fxShake) doShake();
+      if (fxRed) { doFlare("red"); Sound.sfx("damage"); } else if (fxGold) { doFlare("gold"); Sound.sfx("summon"); }
+      if (fxShake) { doShake(); if (!fxRed) Sound.sfx("attack"); }
       if (summonCode) spotlightSummon(summonCode);
       if (st === PR.END) { setStatus("ended"); setPrompt(null); return; }
       if (st === PR.WAITING) {
-        const sel = [...msgs].reverse().find((x) => isSelect(x, MT));
-        if (!sel) return;
-        if (sel.player !== 0) { c.duelSetResponse(h, oppResponse(sel, RT, IA, BA, MT)); if (++autoStreak > 600) { logLine("⚠ opponent stalled — stopping"); return; } await sleep(260); continue; } // AI opponent, paced
-        if (AUTO.includes(sel.type)) { c.duelSetResponse(h, autoResponse(sel, RT, IA, BA, MT)); if (++autoStreak > 600) { logLine("⚠ engine stalled on a selection — stopping"); return; } continue; }
+        const sel = [...msgs].reverse().find((x) => isSelect(x, MT)) || lastSel.current;
+        if (!sel) { logLine("⚠ engine is waiting but no selection request was seen — stopping"); return; }
+        if (sel.player !== 0) { c.duelSetResponse(h, oppResponse(sel, RT, IA, BA, MT)); lastSel.current = null; if (++autoStreak > 600) { logLine("⚠ opponent stalled — stopping"); return; } await sleep(260); continue; } // AI opponent, paced
+        if (AUTO.includes(sel.type)) { c.duelSetResponse(h, autoResponse(sel, RT, IA, BA, MT)); lastSel.current = null; if (++autoStreak > 600) { logLine("⚠ engine stalled on a selection — stopping"); return; } continue; }
         autoStreak = 0;
         setPick([]); setPrompt(sel); return; // a real decision → hand off to the human
       }
@@ -2240,12 +2303,13 @@ function EngineDuel({ main, extra }) {
   };
 
   const respond = (resp) => {
-    try { core.current.duelSetResponse(handle.current, resp); setPrompt(null); setPick([]); drive(); }
+    try { core.current.duelSetResponse(handle.current, resp); lastSel.current = null; setPrompt(null); setPick([]); drive(); }
     catch (e) { setErr(String(e?.message || e)); setStatus("error"); }
   };
 
   const start = async () => {
     setStatus("loading"); setErr(""); setLog([]); setPrompt(null); setBoard(null);
+    lastSel.current = null; turnRef.current = 0; setTurnInfo({ n: 0, player: 0, phase: "" }); setTurnFlash(0);
     try {
       if (!main.length) throw new Error("Build a deck first (Deck Editor tab).");
       // sql.js + cdb
@@ -2257,7 +2321,7 @@ function EngineDuel({ main, extra }) {
       const c = await m.default({ sync: true }); core.current = c;
       const L = m.OcgLocation, MODE = m.OcgDuelMode, POS = m.OcgPosition;
       const h = c.createDuel({
-        flags: MODE?.MODE_MR5 ?? 0n, seed: [1n, 2n, 3n, 4n],
+        flags: MODE?.MODE_MR5 ?? 0n, seed: rndSeed(),
         team1: { startingLP: 8000, startingDrawCount: 5, drawCountPerTurn: 1 },
         team2: { startingLP: 8000, startingDrawCount: 5, drawCountPerTurn: 1 },
         cardReader: makeCardReader(db.current), scriptReader: syncScript,
@@ -2352,19 +2416,37 @@ function EngineDuel({ main, extra }) {
     </div>
   );
 
-  const Zone = ({ card, faceDown, tone = ZONE.mon, size = 66, hand = false }) => {
+  /* one Master Duel zone: an octagonal stone pad; the card (if any) sits on it
+     with the MD-style ★level + ATK/DEF readout underneath */
+  const Zone = ({ card, faceDown, size = 66, hand = false, opp = false }) => {
     const w = size, h = Math.round(size / 0.686);
     const showBack = !hand && card && (faceDown || (card.position & 10)); // FACEDOWN only on the field, never your hand
+    const def = !hand && card && (card.position & 4);
+    if (hand) {
+      return (
+        <div title={card ? nameOf(card.code) : undefined} style={{ width: w, height: h, borderRadius: 5, overflow: "hidden", flexShrink: 0, boxShadow: "0 4px 12px rgba(0,0,0,.5)", background: C.panel2 }}>
+          {card && <CardImg id={card.code} variant="small" name={nameOf(card.code)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+        </div>
+      );
+    }
     return (
-      <div title={card && !showBack ? nameOf(card.code) : undefined} style={{ width: w, height: h, borderRadius: 6, border: `1.5px solid ${card ? shade(tone, -6) : hexA(tone, 0.4)}`, overflow: "hidden", position: "relative", flexShrink: 0,
-        background: card ? C.panel2 : `radial-gradient(120% 120% at 50% 35%, ${hexA(tone, 0.14)}, rgba(4,7,12,.5))`,
-        boxShadow: card ? "0 2px 6px rgba(0,0,0,.5)" : `inset 0 0 10px ${hexA(tone, 0.18)}` }}>
+      <div title={card && !showBack ? nameOf(card.code) : undefined}
+        style={{ width: w + 16, height: w + 16, position: "relative", flexShrink: 0, display: "grid", placeItems: "center" }}>
+        {/* the stone pad */}
+        <div className="octpad stonepad" style={{ position: "absolute", inset: 0, opacity: card ? 0.95 : 0.85 }} />
+        {/* the card on the pad */}
         {card && (
-          <div key={card.code} className="dcard" style={{ position: "absolute", inset: 0 }}>
+          <div key={card.code} className="dcard" style={{ position: "relative", zIndex: 2, width: Math.round(w * 0.74), height: Math.round((w * 0.74) / 0.686), borderRadius: 3, overflow: "hidden", transform: def ? "rotate(90deg) scale(.92)" : "none", boxShadow: "0 3px 10px rgba(0,0,0,.55)", background: C.panel2 }}>
             {showBack
-              ? <div style={{ width: "100%", height: "100%", background: `repeating-linear-gradient(45deg,${shade(C.gold, -30)} 0 4px,#14100a 4px 8px)`, display: "grid", placeItems: "center" }}><div style={{ width: "38%", height: "38%", transform: "rotate(45deg)", background: `linear-gradient(${C.gold},${C.goldDim})`, borderRadius: 3, opacity: .85 }} /></div>
-              : <><CardImg id={card.code} variant="small" name={nameOf(card.code)} style={{ width: "100%", height: "100%", objectFit: "cover", transform: (!hand && (card.position & 4)) ? "rotate(90deg) scale(.8)" : "none" }} />
-                {card.attack != null && <span className="mono" style={{ position: "absolute", bottom: 0, left: 0, right: 0, fontSize: size * 0.13, textAlign: "center", background: "rgba(0,0,0,.62)", color: "#fff" }}>{card.attack}/{card.defense ?? "—"}</span>}</>}
+              ? <div style={{ width: "100%", height: "100%", background: `repeating-linear-gradient(45deg,#6e3f16 0 4px,#3c2008 4px 8px)`, display: "grid", placeItems: "center" }}><div style={{ width: "42%", height: "42%", transform: "rotate(45deg)", background: "radial-gradient(circle at 40% 35%, #caa24a, #7a5a18)", borderRadius: 3 }} /></div>
+              : <CardImg id={card.code} variant="small" name={nameOf(card.code)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+          </div>
+        )}
+        {/* MD-style ★level + ATK/DEF plate below (above for the opponent) */}
+        {card && !showBack && card.attack != null && (
+          <div className="mono atkplate" style={{ position: "absolute", zIndex: 3, left: 0, right: 0, [opp ? "top" : "bottom"]: -4 }}>
+            {card.level ? <span className="lv">★{card.level} </span> : null}
+            <u>{card.attack}</u>/{def ? <b>{card.defense ?? 0}</b> : (card.defense ?? 0)}
           </div>
         )}
       </div>
@@ -2373,72 +2455,106 @@ function EngineDuel({ main, extra }) {
   const b = board;
   const btns = prompt ? promptButtons() : [];
 
-  const lpBar = (s, label, active) => {
-    const pct = Math.max(0, Math.min(100, (s.lp / 8000) * 100));
-    const col = s.lp > 4000 ? C.good : s.lp > 1500 ? C.gold : C.bad;
-    return (
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 8px", borderRadius: 8, background: "rgba(0,0,0,.3)", border: `1px solid ${C.line}` }}>
-        <div className="disp" style={{ width: 30, height: 30, borderRadius: "50%", display: "grid", placeItems: "center", fontSize: 11, color: "#0b0e1a", background: `radial-gradient(circle at 35% 30%, ${shade(col, 40)}, ${shade(col, -30)})` }}>{label}</div>
-        <div style={{ flex: 1, minWidth: 100 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <span className="mono" style={{ fontSize: 8.5, color: C.mute, letterSpacing: ".14em" }}>LP</span>
-            <span key={s.lp} className="mono lpnum" style={{ fontSize: 16, fontWeight: 700, color: col }}>{s.lp}</span>
-          </div>
-          <div style={{ height: 6, borderRadius: 4, background: "rgba(0,0,0,.5)", overflow: "hidden", marginTop: 2, border: `1px solid ${hexA(col, 0.3)}` }}>
-            <div style={{ width: `${pct}%`, height: "100%", background: `linear-gradient(90deg,${shade(col, -20)},${col})`, transition: "width .45s" }} />
-          </div>
-        </div>
-        <span className="mono" style={{ fontSize: 8.5, color: C.mute, whiteSpace: "nowrap" }}>deck {s.deck} · GY {s.grave} · EX {s.extra}</span>
-      </div>
-    );
-  };
-  const row = (arr, tone) => (
-    <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-      {Array.from({ length: 5 }, (_, i) => <Zone key={i} card={arr[i]} tone={tone} size={78} />)}
+  const row = (arr, { opp = false } = {}) => (
+    <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+      {Array.from({ length: 5 }, (_, i) => <Zone key={i} card={arr[i]} size={70} opp={opp} />)}
     </div>
   );
+  const lastLine = log.length ? log[log.length - 1].replace(/^[•⚠] ?/, "") : "";
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", height: "calc(100vh - 60px)" }}>
-      <div className="fieldwrap" style={{ padding: 16, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-        <div className="fieldbg hell" />
-        <div className="fieldbg heaven" />
-        <div className="emberlayer" />
-        <div className="motelayer" />
-        {flare && <div key={flare.n} className={"flarelayer " + (flare.kind === "red" ? "flare-red" : "flare-gold")} />}
-        {summonSpot && (
-          <div key={summonSpot.n} style={{ position: "absolute", inset: 0, zIndex: 4, display: "grid", placeItems: "center", pointerEvents: "none" }}>
-            <div className="summonpop" style={{ filter: "drop-shadow(0 0 32px rgba(240,210,110,.75))" }}>
-              <PopCard card={summonSpot.card} size={190} />
+      <div style={{ padding: 14, display: "flex", flexDirection: "column", justifyContent: "center", overflow: "auto", background: "#0b0d10" }}>
+        <div className={"mdArena" + (shaking ? " shake" : "")} style={{ maxWidth: 980, width: "100%", margin: "0 auto", padding: "42px 56px 36px" }}>
+          {flare && <div key={flare.n} className={"flarelayer " + (flare.kind === "red" ? "flare-red" : "flare-gold")} />}
+
+          {/* corner LP plates — opponent top-right, you bottom-left (as in MD) */}
+          <div className="lpplateOpp">
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+              <span className="lpname disp">Duel Partner</span>
+              <span className="mono lpnumplate"><span style={{ fontSize: 10, color: "#9aa2b1", marginRight: 6 }}>LP</span><span key={b?.opp.lp} className="lpnum">{b?.opp.lp ?? 8000}</span></span>
             </div>
+            <div className="avhex disp">P2</div>
           </div>
-        )}
-        {b && (
-          <div className={shaking ? "shake" : undefined} style={{ position: "relative", zIndex: 1, maxWidth: 900, width: "100%", margin: "0 auto", borderRadius: 16, padding: "16px 22px", display: "flex", flexDirection: "column", gap: 8,
-            background: `radial-gradient(70% 55% at 50% 0%, ${hexA("#e24a28", 0.12)}, transparent 60%), radial-gradient(70% 55% at 50% 100%, ${hexA("#e8c25a", 0.12)}, transparent 60%), linear-gradient(180deg, rgba(20,10,14,.82), rgba(8,8,14,.72) 50%, rgba(18,15,8,.82))`,
-            border: `1px solid ${hexA(C.gold, 0.25)}`, boxShadow: `inset 0 0 90px rgba(0,0,0,.66), 0 0 40px rgba(0,0,0,.5)`, backdropFilter: "blur(1px)" }}>
-            {/* opponent */}
-            {lpBar(b.opp, "P2", false)}
-            {/* opponent hand (backs) */}
-            <div style={{ display: "flex", gap: 3, justifyContent: "center", minHeight: 20 }}>
-              {Array.from({ length: b.opp.hand.length }, (_, i) => <div key={i} style={{ width: 26, height: 18, borderRadius: 3, background: `repeating-linear-gradient(45deg,${shade(C.gold, -30)} 0 3px,#14100a 3px 6px)`, border: `1px solid ${C.line}` }} />)}
-            </div>
-            {row(b.opp.st, ZONE.st)}
-            {row(b.opp.mon, ZONE.mon)}
-            <div className="rift" style={{ margin: "3px 0", textAlign: "center", height: 2, background: `linear-gradient(90deg, transparent, ${hexA(ZONE.emz, 0.9)}, ${hexA(C.gold, 0.6)}, ${hexA(ZONE.emz, 0.9)}, transparent)`, position: "relative" }}>
-              <span className="mono" style={{ position: "absolute", top: -8, left: "50%", transform: "translateX(-50%)", fontSize: 8, color: hexA(ZONE.emz, 0.95), letterSpacing: ".22em", background: "rgba(8,8,14,.85)", padding: "0 6px" }}>◆ FIELD ◆</span>
-            </div>
-            {row(b.me.mon, ZONE.mon)}
-            {row(b.me.st, ZONE.st)}
-            {/* your hand — face-up, larger, scrolls sideways if it grows */}
-            <div style={{ display: "flex", gap: 5, justifyContent: "center", flexWrap: "nowrap", overflowX: "auto", minHeight: 132, padding: "8px 2px", alignItems: "flex-end" }}>
-              {b.me.hand.map((c, i) => <Zone key={i} card={c} hand size={86} tone={ZONE.mon} />)}
-              {b.me.hand.length === 0 && <span className="mono" style={{ fontSize: 11, color: C.mute, alignSelf: "center" }}>empty hand</span>}
-            </div>
-            {lpBar(b.me, "P1", true)}
+          <div className="lpplateMe">
+            <div className="avhex disp">P1</div>
+            <span className="mono lpnumplate"><span style={{ fontSize: 10, color: "#9aa2b1", marginRight: 6 }}>LP</span><span key={b?.me.lp} className="lpnum">{b?.me.lp ?? 8000}</span></span>
           </div>
-        )}
-        {!b && <p className="mono" style={{ position: "relative", zIndex: 1, color: C.mute, fontSize: 12, textAlign: "center" }}>setting up field…</p>}
+
+          {/* turn chip — red hex, right of the EMZ row like MD */}
+          {turnInfo.n > 0 && (
+            <div style={{ position: "absolute", right: 26, top: "46%", zIndex: 20, textAlign: "center" }}>
+              <div className="turnhex disp"><span>Turn {turnInfo.n}<br /><span style={{ fontSize: 8, color: "#ffceb0" }}>{turnInfo.phase}</span></span></div>
+            </div>
+          )}
+
+          {/* right rail — MD's circular blue buttons: ⓘ toggles the info band, 🗒 the field log */}
+          <div style={{ position: "absolute", right: 22, bottom: "20%", zIndex: 20, display: "flex", flexDirection: "column", gap: 10 }}>
+            <button className={"railbtn" + (showBand ? "" : " off")} title="Toggle info band" onClick={() => setShowBand((v) => !v)}>ⓘ</button>
+            <button className={"railbtn" + (arenaLog ? "" : " off")} title="Toggle duel log overlay" onClick={() => setArenaLog((v) => !v)}>🗒</button>
+          </div>
+
+          {summonSpot && (
+            <div key={summonSpot.n} style={{ position: "absolute", inset: 0, zIndex: 24, display: "grid", placeItems: "center", pointerEvents: "none" }}>
+              <div className="summonpop" style={{ filter: "drop-shadow(0 0 32px rgba(240,210,110,.75))" }}>
+                <PopCard card={summonSpot.card} size={190} />
+              </div>
+            </div>
+          )}
+
+          {/* TURN CHANGE — the blue band sweep */}
+          {turnFlash > 0 && turnInfo.n > 1 && <div key={turnFlash} className="turnchange"><span>Turn Change</span></div>}
+
+          {b && (
+            <div className="mdField" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {/* opponent hand (card backs, small, across the far edge) */}
+              <div style={{ display: "flex", gap: 4, justifyContent: "center", minHeight: 22 }}>
+                {Array.from({ length: b.opp.hand.length }, (_, i) => <div key={i} style={{ width: 28, height: 20, borderRadius: 3, background: "repeating-linear-gradient(45deg,#6e3f16 0 3px,#3c2008 3px 6px)", border: "1px solid rgba(0,0,0,.4)", boxShadow: "0 2px 4px rgba(0,0,0,.4)" }} />)}
+              </div>
+              {/* opponent side — red-tinted edge like MD marks enemy territory */}
+              <div className="redrow" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {row(b.opp.st, { opp: true })}
+                {row(b.opp.mon, { opp: true })}
+              </div>
+              {/* middle band: field spells left/right + the two shared EMZs */}
+              <div style={{ display: "flex", gap: 12, justifyContent: "center", alignItems: "center", padding: "2px 0" }}>
+                <Zone card={b.opp.fieldZone} size={58} opp />
+                <div style={{ flex: 1 }} />
+                <Zone card={b.opp.emz[0] || b.me.emz[0]} size={66} />
+                <Zone card={b.opp.emz[1] || b.me.emz[1]} size={66} />
+                <div style={{ flex: 1 }} />
+                <Zone card={b.me.fieldZone} size={58} />
+              </div>
+              {/* your side — the blue glow along your edge, exactly like MD */}
+              <div className="bluerow" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {row(b.me.mon)}
+                {row(b.me.st)}
+              </div>
+              {/* deck / GY / extra counters, small and out of the way */}
+              <div className="mono" style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, color: "rgba(40,44,26,.85)", fontWeight: 700, padding: "0 6px" }}>
+                <span>P1 · deck {b.me.deck} · GY {b.me.grave} · extra {b.me.extra}</span>
+                <span>P2 · deck {b.opp.deck} · GY {b.opp.grave} · extra {b.opp.extra}</span>
+              </div>
+              {/* your hand — face-up along your edge */}
+              <div style={{ display: "flex", gap: 6, justifyContent: "center", flexWrap: "nowrap", overflowX: "auto", minHeight: 118, padding: "6px 2px 2px", alignItems: "flex-end" }}>
+                {b.me.hand.map((c, i) => <Zone key={i} card={c} hand size={76} />)}
+                {b.me.hand.length === 0 && <span className="mono" style={{ fontSize: 11, color: "rgba(40,44,26,.8)", alignSelf: "center" }}>empty hand</span>}
+              </div>
+            </div>
+          )}
+          {!b && <p className="mono" style={{ position: "relative", zIndex: 1, color: "#d9d6c2", fontSize: 12, textAlign: "center" }}>setting up field…</p>}
+
+          {/* MD's dark tutorial/info band across the field */}
+          {showBand && lastLine && (
+            <div className="mdBand" style={{ position: "absolute", left: 0, right: 0, top: "38%", zIndex: 18, pointerEvents: "none" }}>{lastLine}</div>
+          )}
+          {/* recent-log overlay (🗒) */}
+          {arenaLog && (
+            <div className="mono" style={{ position: "absolute", left: 14, top: 46, zIndex: 18, background: "rgba(6,8,10,.78)", border: "1px solid rgba(255,255,255,.14)", borderRadius: 8, padding: "8px 12px", fontSize: 10.5, color: "#e8e6da", maxWidth: 260 }}>
+              {log.slice(-6).map((l, i) => <div key={i} style={{ opacity: 0.55 + (i / 12) }}>{l}</div>)}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* right: prompt + log */}
