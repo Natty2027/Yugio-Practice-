@@ -303,7 +303,7 @@ export default function App() {
           </div>
         </div>
         <nav style={{ display: "flex", gap: 4, marginLeft: 8 }}>
-          {[["editor", "Deck Editor"], ["duel", "Duel"], ["auto", "Auto-Duel β"], ["hand", "Test Hand"], ["stats", "Probability"]].map(([k, l]) => (
+          {[["editor", "Deck Editor"], ["duel", "Duel"], ["hand", "Test Hand"], ["stats", "Probability"]].map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)} className="disp"
               style={{ fontSize: 12, padding: "8px 14px", borderRadius: 6, border: "none",
                 background: tab === k ? C.gold : "transparent",
@@ -326,8 +326,7 @@ export default function App() {
           setMain={setMain} setExtra={setExtra} setSide={setSide}
           addCard={addCard} removeOne={removeOne} countOf={countOf} flash={flash} />
       )}
-      {tab === "duel" && <DuelBoard main={main} extra={extra} />}
-      {tab === "auto" && <EngineDuel main={main} extra={extra} />}
+      {tab === "duel" && <EngineDuel main={main} extra={extra} />}
       {tab === "hand" && <HandTester main={main} />}
       {tab === "stats" && <Probability main={main} />}
 
