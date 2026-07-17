@@ -2107,7 +2107,8 @@ function EngineDuel({ main, extra }) {
 
   const isSelect = (m, MT) => [MT.SELECT_BATTLECMD, MT.SELECT_IDLECMD, MT.SELECT_EFFECTYN, MT.SELECT_YESNO, MT.SELECT_OPTION, MT.SELECT_CARD, MT.SELECT_CHAIN, MT.SELECT_PLACE, MT.SELECT_POSITION, MT.SELECT_TRIBUTE, MT.SELECT_SUM, MT.SELECT_UNSELECT_CARD].includes(m.type);
 
-  // auto-response for the opponent (P1) — pass / decline so it's single-player
+  // minimal auto-resolution (used for the human's complex selects we don't
+  // have a UI for yet, so the game never deadlocks)
   const autoResponse = (m, RT, IA, BA, MT) => {
     switch (m.type) {
       case MT.SELECT_IDLECMD: return { type: RT.SELECT_IDLECMD, action: IA.TO_EP, index: null };
@@ -2117,10 +2118,32 @@ function EngineDuel({ main, extra }) {
       case MT.SELECT_YESNO: return { type: RT.SELECT_YESNO, yes: false };
       case MT.SELECT_OPTION: return { type: RT.SELECT_OPTION, index: 0 };
       case MT.SELECT_CARD: return { type: RT.SELECT_CARD, indicies: Array.from({ length: m.min }, (_, i) => i) };
+      case MT.SELECT_TRIBUTE: return { type: RT.SELECT_TRIBUTE, indicies: Array.from({ length: m.min }, (_, i) => i) };
+      case MT.SELECT_SUM: return { type: RT.SELECT_SUM, indicies: [...(m.selects_must || []).map((_, i) => i), ...Array.from({ length: Math.max(0, m.min) }, (_, i) => i)] };
+      case MT.SELECT_UNSELECT_CARD: return { type: RT.SELECT_UNSELECT_CARD, index: 0 };
       case MT.SELECT_POSITION: return { type: RT.SELECT_POSITION, position: firstPos(m.positions) };
-      case MT.SELECT_PLACE: return { type: RT.SELECT_PLACE, places: firstPlaces(m, 1) };
+      case MT.SELECT_PLACE: case MT.SELECT_DISFIELD: return { type: m.type === MT.SELECT_DISFIELD ? RT.SELECT_DISFIELD : RT.SELECT_PLACE, places: firstPlaces(m, 1) };
       default: return { type: RT.SELECT_YESNO, yes: false };
     }
+  };
+  // the AI opponent (Player 2): actually develops a board — summon, then swing.
+  const oppResponse = (m, RT, IA, BA, MT) => {
+    switch (m.type) {
+      case MT.SELECT_IDLECMD:
+        if (m.summons?.length) return { type: RT.SELECT_IDLECMD, action: IA.SELECT_SUMMON, index: 0 };
+        if (m.to_bp) return { type: RT.SELECT_IDLECMD, action: IA.TO_BP, index: null };
+        return { type: RT.SELECT_IDLECMD, action: IA.TO_EP, index: null };
+      case MT.SELECT_BATTLECMD:
+        if (m.attacks?.length) return { type: RT.SELECT_BATTLECMD, action: BA.SELECT_BATTLE, index: 0 };
+        return { type: RT.SELECT_BATTLECMD, action: m.to_ep ? BA.TO_EP : BA.TO_M2, index: null };
+      default: return autoResponse(m, RT, IA, BA, MT);
+    }
+  };
+  const isMultiSel = (p) => { const MT = mod.current.OcgMessageType; return p && (p.type === MT.SELECT_CARD || p.type === MT.SELECT_TRIBUTE); };
+  const confirmSelect = (cancel) => {
+    const MT = mod.current.OcgMessageType, RT = mod.current.OcgResponseType;
+    const rt = prompt.type === MT.SELECT_TRIBUTE ? RT.SELECT_TRIBUTE : RT.SELECT_CARD;
+    respond({ type: rt, indicies: cancel ? null : pick });
   };
   const firstPos = (mask) => [1, 4, 2, 8].find((p) => mask & p) || 1;
   const firstPlaces = (m, n) => {
@@ -2148,7 +2171,11 @@ function EngineDuel({ main, extra }) {
       if (st === PR.WAITING) {
         const sel = [...msgs].reverse().find((x) => isSelect(x, MT));
         if (!sel) return;
-        if (sel.player !== 0) { c.duelSetResponse(h, autoResponse(sel, RT, IA, BA, MT)); continue; }
+        if (sel.player !== 0) { c.duelSetResponse(h, oppResponse(sel, RT, IA, BA, MT)); continue; } // AI opponent
+        // human selects we don't render a UI for yet → resolve minimally so it never stalls
+        if ([MT.SELECT_SUM, MT.SELECT_UNSELECT_CARD, MT.SELECT_COUNTER, MT.SELECT_DISFIELD].includes(sel.type)) {
+          c.duelSetResponse(h, autoResponse(sel, RT, IA, BA, MT)); logLine("· auto-resolved a complex selection"); continue;
+        }
         setPick([]); setPrompt(sel); return; // hand off to the human
       }
       // CONTINUE → keep processing
@@ -2349,7 +2376,26 @@ function EngineDuel({ main, extra }) {
             {status === "ended" ? "Duel over" : prompt ? "Your decision" : "Engine resolving…"}
           </div>
           {status === "ended" && <button onClick={start} className="disp" style={{ ...btn(), background: C.gold, color: "#1a1206", border: "none" }}>New duel</button>}
-          {prompt && (
+          {prompt && isMultiSel(prompt) && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              <p className="mono" style={{ fontSize: 11, color: C.gold }}>Select {prompt.min}{prompt.max > prompt.min ? `–${prompt.max}` : ""} card{prompt.max > 1 ? "s" : ""}:</p>
+              {(prompt.selects || []).map((c, i) => {
+                const on = pick.includes(i);
+                return (
+                  <button key={i} onClick={() => setPick((p) => p.includes(i) ? p.filter((x) => x !== i) : (p.length < prompt.max ? [...p, i] : p))}
+                    style={{ textAlign: "left", background: on ? "rgba(232,184,75,.15)" : C.panel2, border: `1px solid ${on ? C.gold : C.line}`, color: on ? C.gold : C.text, borderRadius: 6, padding: "7px 10px", fontSize: 12 }}>
+                    {on ? "✓ " : ""}{nameOf(c.code)}
+                  </button>
+                );
+              })}
+              <button disabled={pick.length < prompt.min || pick.length > prompt.max} onClick={() => confirmSelect(false)}
+                style={{ ...btn(), marginTop: 4, background: (pick.length >= prompt.min && pick.length <= prompt.max) ? C.good : C.panel2, color: (pick.length >= prompt.min && pick.length <= prompt.max) ? "#07120b" : C.mute, border: "none" }}>
+                Confirm ({pick.length})
+              </button>
+              {prompt.can_cancel && <button onClick={() => confirmSelect(true)} style={{ ...btn(), color: C.bad, borderColor: C.bad }}>Cancel</button>}
+            </div>
+          )}
+          {prompt && !isMultiSel(prompt) && (
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               {btns.length === 0 && <p className="mono" style={{ fontSize: 11, color: C.mute }}>(no options — the engine may be mid-resolution)</p>}
               {btns.map((x, i) => (
