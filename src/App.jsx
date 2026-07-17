@@ -306,7 +306,9 @@ export default function App() {
         .flare-red{background:radial-gradient(circle at 50% 40%,transparent 35%,rgba(226,60,40,.6));animation:flarefade .6s ease forwards}
         .flare-gold{background:radial-gradient(120% 70% at 50% 100%,rgba(240,210,110,.55),transparent 62%);animation:flarefade .75s ease forwards}
         @keyframes flarefade{0%{opacity:0}22%{opacity:1}100%{opacity:0}}
-        @media (prefers-reduced-motion:reduce){.cardimg,.dcard,.lpnum,.turnbanner,.dmgflash,.shake,.atktarget,.fieldbg,.emberlayer,.motelayer,.rift,.flare-red,.flare-gold{animation:none;transition:none}}
+        .summonpop{animation:summonpop 1.3s cubic-bezier(.2,.8,.2,1) forwards}
+        @keyframes summonpop{0%{opacity:0;transform:scale(.4) translateY(24px)}18%{opacity:1;transform:scale(1.06) translateY(0)}72%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.03) translateY(-10px)}}
+        @media (prefers-reduced-motion:reduce){.cardimg,.dcard,.lpnum,.turnbanner,.dmgflash,.shake,.atktarget,.fieldbg,.emberlayer,.motelayer,.rift,.flare-red,.flare-gold,.summonpop{animation:none;transition:none}}
       `}</style>
 
       {/* header */}
@@ -2105,10 +2107,22 @@ function EngineDuel({ main, extra }) {
   const [diag, setDiag] = useState(false);
   const [flare, setFlare] = useState(null); // {kind,n} reactive arena flash
   const [shaking, setShaking] = useState(false);
+  const [summonSpot, setSummonSpot] = useState(null); // {card,n} 3D pop-out on summon
   const core = useRef(null), handle = useRef(null), mod = useRef(null), db = useRef(null), fxN = useRef(0);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const doFlare = (kind) => { fxN.current += 1; setFlare({ kind, n: fxN.current }); };
   const doShake = () => { setShaking(true); setTimeout(() => setShaking(false), 420); };
+  // build a card object for the PopCard from a passcode
+  const cardObjFromCode = (code) => {
+    try {
+      const r = db.current.exec(`SELECT type,atk,def,level FROM datas WHERE id=${code}`);
+      const v = r?.[0]?.values?.[0] || [];
+      const t = Number(v[0]) >>> 0;
+      const ft = (t & 0x4) ? "trap" : (t & 0x2) ? "spell" : (t & 0x4000000) ? "link" : (t & 0x800000) ? "xyz" : (t & 0x2000) ? "synchro" : (t & 0x40) ? "fusion" : (t & 0x80) ? "ritual" : (t & 0x10) ? "normal" : "effect";
+      return { id: code, name: nameOf(code), frameType: ft, type: ft, atk: (t & 0x1) ? Number(v[1]) : null, def: (t & 0x1) ? Number(v[2]) : null, level: (t & 0x1) ? (Number(v[3]) & 0xff) : null };
+    } catch { return { id: code, name: nameOf(code), frameType: "effect", type: "", atk: null, def: null, level: null }; }
+  };
+  const spotlightSummon = (code) => { fxN.current += 1; setSummonSpot({ card: cardObjFromCode(code), n: fxN.current }); setTimeout(() => setSummonSpot((s) => (s && s.n === fxN.current ? null : s)), 1300); };
 
   const logLine = (s) => setLog((l) => [...l.slice(-160), s]);
   const nameOf = (code) => {
@@ -2147,16 +2161,27 @@ function EngineDuel({ main, extra }) {
       default: return { type: RT.SELECT_YESNO, yes: false };
     }
   };
-  // the AI opponent (Player 2): actually develops a board — summon, then swing.
+  // the AI opponent (Player 2): plays its OWN line — varied, not a mirror.
+  const rnd = (n) => Math.floor(Math.random() * n);
   const oppResponse = (m, RT, IA, BA, MT) => {
     switch (m.type) {
-      case MT.SELECT_IDLECMD:
-        if (m.summons?.length) return { type: RT.SELECT_IDLECMD, action: IA.SELECT_SUMMON, index: 0 };
+      case MT.SELECT_IDLECMD: {
+        // occasionally set a monster or backrow instead of always summoning the first card
+        if (m.summons?.length && Math.random() < 0.75) return { type: RT.SELECT_IDLECMD, action: IA.SELECT_SUMMON, index: rnd(m.summons.length) };
+        if (m.monster_sets?.length && Math.random() < 0.5) return { type: RT.SELECT_IDLECMD, action: IA.SELECT_MONSTER_SET, index: rnd(m.monster_sets.length) };
+        if (m.spell_sets?.length && Math.random() < 0.6) return { type: RT.SELECT_IDLECMD, action: IA.SELECT_SPELL_SET, index: rnd(m.spell_sets.length) };
+        if (m.activates?.length && Math.random() < 0.4) return { type: RT.SELECT_IDLECMD, action: IA.SELECT_ACTIVATE, index: rnd(m.activates.length) };
         if (m.to_bp) return { type: RT.SELECT_IDLECMD, action: IA.TO_BP, index: null };
         return { type: RT.SELECT_IDLECMD, action: IA.TO_EP, index: null };
+      }
       case MT.SELECT_BATTLECMD:
-        if (m.attacks?.length) return { type: RT.SELECT_BATTLECMD, action: BA.SELECT_BATTLE, index: 0 };
+        if (m.attacks?.length) return { type: RT.SELECT_BATTLECMD, action: BA.SELECT_BATTLE, index: rnd(m.attacks.length) };
         return { type: RT.SELECT_BATTLECMD, action: m.to_ep ? BA.TO_EP : BA.TO_M2, index: null };
+      case MT.SELECT_CARD: case MT.SELECT_TRIBUTE: return { type: m.type === MT.SELECT_TRIBUTE ? RT.SELECT_TRIBUTE : RT.SELECT_CARD, indicies: Array.from({ length: m.min }, (_, i) => i) };
+      case MT.SELECT_CHAIN: return { type: RT.SELECT_CHAIN, index: m.forced ? 0 : null };
+      case MT.SELECT_EFFECTYN: return { type: RT.SELECT_EFFECTYN, yes: Math.random() < 0.6 };
+      case MT.SELECT_YESNO: return { type: RT.SELECT_YESNO, yes: Math.random() < 0.5 };
+      case MT.SELECT_POSITION: return { type: RT.SELECT_POSITION, position: firstPos(m.positions) };
       default: return autoResponse(m, RT, IA, BA, MT);
     }
   };
@@ -2177,11 +2202,13 @@ function EngineDuel({ main, extra }) {
   const drive = async () => {
     const c = core.current, h = handle.current, m = mod.current;
     const MT = m.OcgMessageType, PR = m.OcgProcessResult, RT = m.OcgResponseType, IA = m.SelectIdleCMDAction, BA = m.SelectBattleCMDAction;
-    let guard = 0;
-    while (guard++ < 6000) {
+    // selections we resolve automatically for the human (no meaningful choice / no UI yet)
+    const AUTO = [MT.SELECT_PLACE, MT.SELECT_SUM, MT.SELECT_UNSELECT_CARD, MT.SELECT_COUNTER, MT.SELECT_DISFIELD];
+    let guard = 0, autoStreak = 0;
+    while (guard++ < 8000) {
       const st = c.duelProcess(h);
       const msgs = c.duelGetMessage(h) || [];
-      let shown = false, fxRed = false, fxGold = false, fxShake = false;
+      let shown = false, fxRed = false, fxGold = false, fxShake = false, summonCode = null;
       for (const msg of msgs) {
         if (msg.type === MT.HINT) continue;
         const nm = (m.ocgMessageTypeStrings?.get?.(msg.type)) || `msg#${msg.type}`;
@@ -2190,25 +2217,26 @@ function EngineDuel({ main, extra }) {
         }
         if (msg.type === MT.DAMAGE) { fxRed = true; fxShake = true; }
         else if (msg.type === MT.ATTACK) fxShake = true;
-        else if ([MT.SUMMONING, MT.SPSUMMONING, MT.FLIPSUMMONING].includes(msg.type)) fxGold = true;
+        else if ([MT.SUMMONING, MT.SPSUMMONING, MT.FLIPSUMMONING].includes(msg.type)) { fxGold = true; if (msg.code) summonCode = msg.code; }
       }
       readBoard();
       if (fxRed) doFlare("red"); else if (fxGold) doFlare("gold");
       if (fxShake) doShake();
+      if (summonCode) spotlightSummon(summonCode);
       if (st === PR.END) { setStatus("ended"); setPrompt(null); return; }
       if (st === PR.WAITING) {
         const sel = [...msgs].reverse().find((x) => isSelect(x, MT));
         if (!sel) return;
-        if (sel.player !== 0) { c.duelSetResponse(h, oppResponse(sel, RT, IA, BA, MT)); await sleep(260); continue; } // AI opponent, paced
-        // human selects we don't render a UI for yet → resolve minimally so it never stalls
-        if ([MT.SELECT_SUM, MT.SELECT_UNSELECT_CARD, MT.SELECT_COUNTER, MT.SELECT_DISFIELD].includes(sel.type)) {
-          c.duelSetResponse(h, autoResponse(sel, RT, IA, BA, MT)); logLine("· auto-resolved a complex selection"); continue;
-        }
-        setPick([]); setPrompt(sel); return; // hand off to the human
+        if (sel.player !== 0) { c.duelSetResponse(h, oppResponse(sel, RT, IA, BA, MT)); if (++autoStreak > 600) { logLine("⚠ opponent stalled — stopping"); return; } await sleep(260); continue; } // AI opponent, paced
+        if (AUTO.includes(sel.type)) { c.duelSetResponse(h, autoResponse(sel, RT, IA, BA, MT)); if (++autoStreak > 600) { logLine("⚠ engine stalled on a selection — stopping"); return; } continue; }
+        autoStreak = 0;
+        setPick([]); setPrompt(sel); return; // a real decision → hand off to the human
       }
-      if (shown) await sleep(150); // let the animation/flare breathe
+      autoStreak = 0;
+      if (shown) await sleep(summonCode ? 900 : 150); // let animations / the summon spotlight breathe
       // CONTINUE → keep processing
     }
+    logLine("⚠ processing cap reached — stopping");
   };
 
   const respond = (resp) => {
@@ -2331,11 +2359,14 @@ function EngineDuel({ main, extra }) {
       <div title={card && !showBack ? nameOf(card.code) : undefined} style={{ width: w, height: h, borderRadius: 6, border: `1.5px solid ${card ? shade(tone, -6) : hexA(tone, 0.4)}`, overflow: "hidden", position: "relative", flexShrink: 0,
         background: card ? C.panel2 : `radial-gradient(120% 120% at 50% 35%, ${hexA(tone, 0.14)}, rgba(4,7,12,.5))`,
         boxShadow: card ? "0 2px 6px rgba(0,0,0,.5)" : `inset 0 0 10px ${hexA(tone, 0.18)}` }}>
-        {card ? (showBack
-          ? <div style={{ width: "100%", height: "100%", background: `repeating-linear-gradient(45deg,${shade(C.gold, -30)} 0 4px,#14100a 4px 8px)`, display: "grid", placeItems: "center" }}><div style={{ width: "38%", height: "38%", transform: "rotate(45deg)", background: `linear-gradient(${C.gold},${C.goldDim})`, borderRadius: 3, opacity: .85 }} /></div>
-          : <><CardImg id={card.code} variant="small" name={nameOf(card.code)} style={{ width: "100%", height: "100%", objectFit: "cover", transform: (!hand && (card.position & 4)) ? "rotate(90deg) scale(.8)" : "none" }} />
-            {card.attack != null && <span className="mono" style={{ position: "absolute", bottom: 0, left: 0, right: 0, fontSize: size * 0.13, textAlign: "center", background: "rgba(0,0,0,.62)", color: "#fff" }}>{card.attack}/{card.defense ?? "—"}</span>}</>)
-          : null}
+        {card && (
+          <div key={card.code} className="dcard" style={{ position: "absolute", inset: 0 }}>
+            {showBack
+              ? <div style={{ width: "100%", height: "100%", background: `repeating-linear-gradient(45deg,${shade(C.gold, -30)} 0 4px,#14100a 4px 8px)`, display: "grid", placeItems: "center" }}><div style={{ width: "38%", height: "38%", transform: "rotate(45deg)", background: `linear-gradient(${C.gold},${C.goldDim})`, borderRadius: 3, opacity: .85 }} /></div>
+              : <><CardImg id={card.code} variant="small" name={nameOf(card.code)} style={{ width: "100%", height: "100%", objectFit: "cover", transform: (!hand && (card.position & 4)) ? "rotate(90deg) scale(.8)" : "none" }} />
+                {card.attack != null && <span className="mono" style={{ position: "absolute", bottom: 0, left: 0, right: 0, fontSize: size * 0.13, textAlign: "center", background: "rgba(0,0,0,.62)", color: "#fff" }}>{card.attack}/{card.defense ?? "—"}</span>}</>}
+          </div>
+        )}
       </div>
     );
   };
@@ -2375,6 +2406,13 @@ function EngineDuel({ main, extra }) {
         <div className="emberlayer" />
         <div className="motelayer" />
         {flare && <div key={flare.n} className={"flarelayer " + (flare.kind === "red" ? "flare-red" : "flare-gold")} />}
+        {summonSpot && (
+          <div key={summonSpot.n} style={{ position: "absolute", inset: 0, zIndex: 4, display: "grid", placeItems: "center", pointerEvents: "none" }}>
+            <div className="summonpop" style={{ filter: "drop-shadow(0 0 32px rgba(240,210,110,.75))" }}>
+              <PopCard card={summonSpot.card} size={190} />
+            </div>
+          </div>
+        )}
         {b && (
           <div className={shaking ? "shake" : undefined} style={{ position: "relative", zIndex: 1, maxWidth: 900, width: "100%", margin: "0 auto", borderRadius: 16, padding: "16px 22px", display: "flex", flexDirection: "column", gap: 8,
             background: `radial-gradient(70% 55% at 50% 0%, ${hexA("#e24a28", 0.12)}, transparent 60%), radial-gradient(70% 55% at 50% 100%, ${hexA("#e8c25a", 0.12)}, transparent 60%), linear-gradient(180deg, rgba(20,10,14,.82), rgba(8,8,14,.72) 50%, rgba(18,15,8,.82))`,
