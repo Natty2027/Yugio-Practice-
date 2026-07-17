@@ -2268,17 +2268,21 @@ function EngineDuel({ main, extra }) {
     </div>
   );
 
-  const Zone = ({ card, faceDown, tone = ZONE.mon }) => (
-    <div style={{ width: 50, height: 73, borderRadius: 6, border: `1.5px solid ${card ? shade(tone, -6) : hexA(tone, 0.4)}`, overflow: "hidden", position: "relative", flexShrink: 0,
-      background: card ? C.panel2 : `radial-gradient(120% 120% at 50% 35%, ${hexA(tone, 0.14)}, rgba(4,7,12,.5))`,
-      boxShadow: card ? "none" : `inset 0 0 10px ${hexA(tone, 0.18)}` }}>
-      {card ? (faceDown || (card.position & 10)
-        ? <div style={{ width: "100%", height: "100%", background: `repeating-linear-gradient(45deg,${shade(C.gold, -30)} 0 4px,#14100a 4px 8px)`, display: "grid", placeItems: "center" }}><div style={{ width: "38%", height: "38%", transform: "rotate(45deg)", background: `linear-gradient(${C.gold},${C.goldDim})`, borderRadius: 3, opacity: .85 }} /></div>
-        : <><CardImg id={card.code} variant="small" name={nameOf(card.code)} style={{ width: "100%", height: "100%", objectFit: "cover", transform: (card.position & 4) ? "rotate(90deg) scale(.8)" : "none" }} />
-          {card.attack != null && <span className="mono" style={{ position: "absolute", bottom: 0, left: 0, right: 0, fontSize: 7.5, textAlign: "center", background: "rgba(0,0,0,.6)", color: "#fff" }}>{card.attack}/{card.defense ?? "—"}</span>}</>)
-        : null}
-    </div>
-  );
+  const Zone = ({ card, faceDown, tone = ZONE.mon, size = 66, hand = false }) => {
+    const w = size, h = Math.round(size / 0.686);
+    const showBack = !hand && card && (faceDown || (card.position & 10)); // FACEDOWN only on the field, never your hand
+    return (
+      <div title={card && !showBack ? nameOf(card.code) : undefined} style={{ width: w, height: h, borderRadius: 6, border: `1.5px solid ${card ? shade(tone, -6) : hexA(tone, 0.4)}`, overflow: "hidden", position: "relative", flexShrink: 0,
+        background: card ? C.panel2 : `radial-gradient(120% 120% at 50% 35%, ${hexA(tone, 0.14)}, rgba(4,7,12,.5))`,
+        boxShadow: card ? "0 2px 6px rgba(0,0,0,.5)" : `inset 0 0 10px ${hexA(tone, 0.18)}` }}>
+        {card ? (showBack
+          ? <div style={{ width: "100%", height: "100%", background: `repeating-linear-gradient(45deg,${shade(C.gold, -30)} 0 4px,#14100a 4px 8px)`, display: "grid", placeItems: "center" }}><div style={{ width: "38%", height: "38%", transform: "rotate(45deg)", background: `linear-gradient(${C.gold},${C.goldDim})`, borderRadius: 3, opacity: .85 }} /></div>
+          : <><CardImg id={card.code} variant="small" name={nameOf(card.code)} style={{ width: "100%", height: "100%", objectFit: "cover", transform: (!hand && (card.position & 4)) ? "rotate(90deg) scale(.8)" : "none" }} />
+            {card.attack != null && <span className="mono" style={{ position: "absolute", bottom: 0, left: 0, right: 0, fontSize: size * 0.13, textAlign: "center", background: "rgba(0,0,0,.62)", color: "#fff" }}>{card.attack}/{card.defense ?? "—"}</span>}</>)
+          : null}
+      </div>
+    );
+  };
   const b = board;
   const btns = prompt ? promptButtons() : [];
 
@@ -2302,16 +2306,16 @@ function EngineDuel({ main, extra }) {
     );
   };
   const row = (arr, tone) => (
-    <div style={{ display: "flex", gap: 5, justifyContent: "center" }}>
-      {Array.from({ length: 5 }, (_, i) => <Zone key={i} card={arr[i]} tone={tone} />)}
+    <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+      {Array.from({ length: 5 }, (_, i) => <Zone key={i} card={arr[i]} tone={tone} size={78} />)}
     </div>
   );
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", height: "calc(100vh - 60px)" }}>
-      <div style={{ overflow: "auto", padding: 14, display: "flex", flexDirection: "column", justifyContent: "center", background: "#0a0f1b" }}>
+      <div style={{ overflow: "auto", padding: 16, display: "flex", flexDirection: "column", justifyContent: "center", background: "#0a0f1b" }}>
         {b && (
-          <div style={{ maxWidth: 560, width: "100%", margin: "0 auto", borderRadius: 14, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6,
+          <div style={{ maxWidth: 900, width: "100%", margin: "0 auto", borderRadius: 16, padding: "16px 22px", display: "flex", flexDirection: "column", gap: 8,
             background: `radial-gradient(70% 55% at 50% 0%, ${hexA(ZONE.st, 0.1)}, transparent 62%), radial-gradient(70% 55% at 50% 100%, ${hexA(ZONE.mon, 0.09)}, transparent 62%), linear-gradient(180deg,#0e1424,#0a0f1b 50%,#0e1424)`,
             border: `1px solid ${C.line}`, boxShadow: "inset 0 0 80px rgba(0,0,0,.62)" }}>
             {/* opponent */}
@@ -2327,10 +2331,10 @@ function EngineDuel({ main, extra }) {
             </div>
             {row(b.me.mon, ZONE.mon)}
             {row(b.me.st, ZONE.st)}
-            {/* your hand */}
-            <div style={{ display: "flex", gap: 4, justifyContent: "center", flexWrap: "wrap", minHeight: 74, padding: "4px 0" }}>
-              {b.me.hand.map((c, i) => <Zone key={i} card={c} tone={ZONE.mon} />)}
-              {b.me.hand.length === 0 && <span className="mono" style={{ fontSize: 10, color: C.mute, alignSelf: "center" }}>empty hand</span>}
+            {/* your hand — face-up, larger, scrolls sideways if it grows */}
+            <div style={{ display: "flex", gap: 5, justifyContent: "center", flexWrap: "nowrap", overflowX: "auto", minHeight: 132, padding: "8px 2px", alignItems: "flex-end" }}>
+              {b.me.hand.map((c, i) => <Zone key={i} card={c} hand size={86} tone={ZONE.mon} />)}
+              {b.me.hand.length === 0 && <span className="mono" style={{ fontSize: 11, color: C.mute, alignSelf: "center" }}>empty hand</span>}
             </div>
             {lpBar(b.me, "P1", true)}
           </div>
